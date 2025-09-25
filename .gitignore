@@ -1,0 +1,14 @@
+# Virtual environment
+.venv/
+
+# IDE files
+.idea/
+
+# OS artifacts
+.DS_Store
+
+# Build caches
+.uv-cache/
+
+# Sensitive tokens
+auth_token.txt

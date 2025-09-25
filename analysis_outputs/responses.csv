@@ -1,0 +1,11 @@
+run,status_code,latency_ms,patient_ready,patient_short_notice,patient_prioritized,reasoning,availability_periods
+1,200,901.2298750458285,,True,,Pasienten kan komme på kort varsel ved avlysning og bor i nærheten.,
+2,200,671.0683330893517,,True,,Pasienten kan komme på kort varsel ved avlysning og bor i nærheten.,
+3,200,462.3270001029596,False,True,False,"Pasienten kan komme på kort varsel dersom det blir en avlysning, og bor i nærheten.","{""start_date"": ""2025-09-16"", ""type"": ""available_from""}"
+4,200,501.9592910539359,,True,False,Pasienten kan komme på kort varsel ved avlysning og bor i nærheten.,"{""start_date"": ""2025-09-16"", ""type"": ""available_from""}"
+5,200,654.6174590475857,,True,,Pasienten kan komme på kort varsel og bor i nærheten.,
+6,200,655.5501249385998,,True,,Pasienten kan komme på kort varsel ved avlysning og bor i nærheten.,
+7,200,468.25741697102785,,True,,Pasienten kan komme på kort varsel og bor i nærheten.,
+8,200,623.3996250666678,,True,,Pasienten kan komme på kort varsel og bor i nærheten.,
+9,200,457.991584087722,,True,,Pasienten kan komme på kort varsel og bor i nærheten.,"{""start_date"": ""2025-09-16"", ""type"": ""available_from""}"
+10,200,723.6833339557052,,True,False,"Pasienten kan komme på kort varsel, og bor i nærheten, noe som indikerer fleksibilitet med tanke på tidspunkt.","{""start_date"": ""2025-09-16"", ""type"": ""available_from""}"
