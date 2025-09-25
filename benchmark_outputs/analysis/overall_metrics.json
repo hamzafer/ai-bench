@@ -1,0 +1,10 @@
+{
+  "total_examples": 100,
+  "total_runs": 1000,
+  "ready_accuracy": 0.952,
+  "short_accuracy": 0.958,
+  "priority_accuracy": 0.692,
+  "overall_accuracy": 0.678,
+  "success_rate": 1.0,
+  "deterministic_examples": 55
+}
