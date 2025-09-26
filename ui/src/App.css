@@ -121,6 +121,27 @@ body {
   color: #374151;
 }
 
+.value-pair__label {
+  font-weight: 500;
+  color: #2563eb;
+  margin-right: 0.35rem;
+}
+
+.row-action {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.row-action:disabled {
+  background: #6ee7b7;
+  cursor: wait;
+}
+
 .match-true {
   background: #ecfdf5;
 }

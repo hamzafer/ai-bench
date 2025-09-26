@@ -18,6 +18,7 @@ function App() {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [rowLoading, setRowLoading] = useState(null);
   const [error, setError] = useState('');
 
   const loadResults = async () => {
@@ -62,6 +63,34 @@ function App() {
   const metrics = useMemo(() => summary?.metrics || [], [summary]);
   const latency = summary?.latency_stats;
 
+  const runRow = async (rowId) => {
+    setRowLoading(rowId);
+    setError('');
+    try {
+      const response = await fetch(`/api/run-row/${rowId}`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Row benchmark failed');
+      }
+      const payload = await response.json();
+      if (payload.summary) {
+        setSummary(payload.summary);
+      }
+      if (payload.row) {
+        setRows((prev) =>
+          prev.map((item) => (item.id === rowId ? payload.row : item)),
+        );
+      } else {
+        await loadResults();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRowLoading(null);
+    }
+  };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -100,24 +129,34 @@ function App() {
           <table>
             <thead>
               <tr>
-                <th>ID</th>
+                <th>No.</th>
                 <th>Comment</th>
                 {FIELD_LABELS.map((field) => (
                   <th key={field.key}>{field.label}</th>
                 ))}
                 <th>Availability Periods</th>
                 <th>Latency (ms)</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {rows.map((row, index) => {
                 const prediction = row.prediction || {};
-                const availabilityMatch = normalizeValue(row.truth.availability_periods) ===
-                  (prediction.availability_periods && prediction.availability_periods.length ? 'list' : 'null');
+                const truthAvailability = normalizeValue(
+                  row.truth.availability_periods === 'null'
+                    ? null
+                    : row.truth.availability_periods && row.truth.availability_periods !== 'null'
+                    ? 'list'
+                    : row.truth.availability_periods,
+                );
+                const predAvailability = prediction.availability_periods && prediction.availability_periods.length
+                  ? 'list'
+                  : 'null';
+                const availabilityMatch = truthAvailability === predAvailability;
 
                 return (
                   <tr key={row.id}>
-                    <td>{row.id}</td>
+                    <td>{row.row_number ?? index + 1}</td>
                     <td className="comment-cell">{row.comment_text}</td>
                     {FIELD_LABELS.map(({ key }) => {
                       const truthValue = normalizeValue(row.truth[key]);
@@ -127,21 +166,37 @@ function App() {
                       return (
                         <td key={key} className={className}>
                           <div className="value-pair">
-                            <span className="value-pair__truth">{truthValue}</span>
-                            <span className="value-pair__pred">{predValue}</span>
+                            <span className="value-pair__truth">
+                              <span className="value-pair__label">Truth:</span> {truthValue}
+                            </span>
+                            <span className="value-pair__pred">
+                              <span className="value-pair__label">Prediction:</span> {predValue}
+                            </span>
                           </div>
                         </td>
                       );
                     })}
                     <td className={availabilityMatch ? 'match-true' : 'match-false'}>
                       <div className="value-pair">
-                        <span className="value-pair__truth">{row.truth.availability_periods}</span>
+                        <span className="value-pair__truth">
+                          <span className="value-pair__label">Truth:</span> {row.truth.availability_periods}
+                        </span>
                         <span className="value-pair__pred">
+                          <span className="value-pair__label">Prediction:</span>{' '}
                           {prediction.availability_periods ? JSON.stringify(prediction.availability_periods) : 'null'}
                         </span>
                       </div>
                     </td>
                     <td>{row.latency_ms ? row.latency_ms.toFixed(0) : '—'}</td>
+                    <td>
+                      <button
+                        className="row-action"
+                        onClick={() => runRow(row.id)}
+                        disabled={loading || rowLoading === row.id}
+                      >
+                        {rowLoading === row.id ? 'Updating…' : 'Re-run'}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
