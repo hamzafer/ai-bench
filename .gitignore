@@ -43,3 +43,7 @@ logs/
 
 # Gemini cache
 data/gemini_cache/
+
+# UI build artifacts
+ui/node_modules/
+ui/dist/
