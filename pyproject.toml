@@ -1,0 +1,16 @@
+[project]
+name = "comment-benchmark"
+version = "0.1.0"
+description = "Dataset synthesis utilities for Comment Sense v2 benchmarking."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "google-generativeai>=0.8.3",
+]
+
+[build-system]
+requires = ["setuptools>=67"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
