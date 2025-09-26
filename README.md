@@ -10,12 +10,3 @@ if you are using the provided `pyproject.toml`:
 ```bash
 uv sync
 ```
-
-Run the example analysis script:
-
-```bash
-python analyze_endpoint.py
-```
-
-Outputs are written to `analysis_outputs/` with plots and summary tables
-for further inspection.
