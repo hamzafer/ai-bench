@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 import urllib3
 
@@ -187,3 +187,37 @@ def run_row(row_id: str) -> Dict[str, Any]:
     combined = _combine_rows()
     updated_row = next((item for item in combined if item["id"] == row_id), None)
     return {"row": updated_row, "summary": _read_summary()}
+
+
+@app.post("/api/run-row/{row_id}/batch")
+def run_row_batch(row_id: str, count: int = Query(5, ge=1, le=20)) -> Dict[str, Any]:
+    truth_rows = _read_ground_truth()
+    truth_map = {row["id"]: (idx + 1, row) for idx, row in enumerate(truth_rows)}
+    if row_id not in truth_map:
+        raise HTTPException(status_code=404, detail="Row not found")
+
+    row_number, truth_row = truth_map[row_id]
+    runs: List[Dict[str, Any]] = []
+    for attempt in range(1, count + 1):
+        result_payload = _call_comment_analysis(truth_row["comment_text"])
+        runs.append(
+            {
+                "attempt": attempt,
+                "latency_ms": result_payload["latency_ms"],
+                "status_code": result_payload["status_code"],
+                "prediction": result_payload["response"].get("en"),
+                "response": result_payload["response"],
+            }
+        )
+
+    return {
+        "row_id": row_id,
+        "row_number": row_number,
+        "truth": {
+            "patient_prioritized": truth_row.get("patient_prioritized"),
+            "patient_ready": truth_row.get("patient_ready"),
+            "patient_short_notice": truth_row.get("patient_short_notice"),
+            "availability_periods": truth_row.get("availability_periods"),
+        },
+        "runs": runs,
+    }

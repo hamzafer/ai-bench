@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import './App.css';
 
 const FIELD_LABELS = [
@@ -19,6 +19,10 @@ function App() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rowLoading, setRowLoading] = useState(null);
+  const [deterministicLoading, setDeterministicLoading] = useState(null);
+  const [expandedRow, setExpandedRow] = useState(null);
+  const [deterministicCounts, setDeterministicCounts] = useState({});
+  const [deterministicResults, setDeterministicResults] = useState({});
   const [error, setError] = useState('');
 
   const loadResults = async () => {
@@ -63,6 +67,10 @@ function App() {
   const metrics = useMemo(() => summary?.metrics || [], [summary]);
   const latency = summary?.latency_stats;
 
+  const setCountForRow = (rowId, value) => {
+    setDeterministicCounts((prev) => ({ ...prev, [rowId]: value }));
+  };
+
   const runRow = async (rowId) => {
     setRowLoading(rowId);
     setError('');
@@ -89,6 +97,30 @@ function App() {
     } finally {
       setRowLoading(null);
     }
+  };
+
+  const runRowBatch = async (rowId, count) => {
+    setDeterministicLoading(rowId);
+    setError('');
+    try {
+      const response = await fetch(`/api/run-row/${rowId}/batch?count=${count}`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Determinism check failed');
+      }
+      const payload = await response.json();
+      setDeterministicResults((prev) => ({ ...prev, [rowId]: payload }));
+      setExpandedRow(rowId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeterministicLoading(null);
+    }
+  };
+
+  const toggleExpandedRow = (rowId) => {
+    setExpandedRow((prev) => (prev === rowId ? null : rowId));
   };
 
   return (
@@ -154,8 +186,13 @@ function App() {
                   : 'null';
                 const availabilityMatch = truthAvailability === predAvailability;
 
+                const batchCount = deterministicCounts[row.id] ?? 5;
+                const detail = deterministicResults[row.id];
+                const isExpanded = expandedRow === row.id;
+
                 return (
-                  <tr key={row.id}>
+                  <Fragment key={row.id}>
+                  <tr>
                     <td>{row.row_number ?? index + 1}</td>
                     <td className="comment-cell">{row.comment_text}</td>
                     {FIELD_LABELS.map(({ key }) => {
@@ -189,15 +226,79 @@ function App() {
                     </td>
                     <td>{row.latency_ms ? row.latency_ms.toFixed(0) : '—'}</td>
                     <td>
-                      <button
-                        className="row-action"
-                        onClick={() => runRow(row.id)}
-                        disabled={loading || rowLoading === row.id}
-                      >
-                        {rowLoading === row.id ? 'Updating…' : 'Re-run'}
-                      </button>
+                      <div className="action-stack">
+                        <button
+                          className="row-action"
+                          onClick={() => runRow(row.id)}
+                          disabled={loading || rowLoading === row.id}
+                        >
+                          {rowLoading === row.id ? 'Updating…' : 'Re-run'}
+                        </button>
+                        <div className="batch-actions">
+                          <select
+                            value={batchCount}
+                            onChange={(event) => setCountForRow(row.id, Number(event.target.value))}
+                            disabled={deterministicLoading === row.id || loading}
+                          >
+                            {[1, 5, 10].map((value) => (
+                              <option key={value} value={value}>
+                                {value}×
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="row-action secondary"
+                            onClick={() => runRowBatch(row.id, batchCount)}
+                            disabled={deterministicLoading === row.id || loading}
+                          >
+                            {deterministicLoading === row.id ? 'Running…' : 'Determinism'}
+                          </button>
+                        </div>
+                        <button
+                          className="row-expand"
+                          onClick={() => toggleExpandedRow(row.id)}
+                        >
+                          {isExpanded ? 'Hide details' : 'Show details'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
+                  {isExpanded && (
+                    <tr className="deterministic-detail">
+                      <td colSpan={8}>
+                        <div className="deterministic-panel">
+                          <h4>Determinism Check</h4>
+                          {deterministicLoading === row.id && <p>Running…</p>}
+                          {deterministicLoading !== row.id && (!detail || detail.runs?.length === 0) && (
+                            <p>No runs yet. Choose a count and press Determinism.</p>
+                          )}
+                          {deterministicLoading !== row.id && detail?.runs?.length > 0 && (
+                            <div className="deterministic-runs">
+                              {detail.runs.map((run) => (
+                                <div key={run.attempt} className="deterministic-run-card">
+                                  <div className="deterministic-run-header">
+                                    <span>Attempt {run.attempt}</span>
+                                    <span>{run.latency_ms.toFixed(0)} ms</span>
+                                  </div>
+                                  <div className="deterministic-run-body">
+                                    {FIELD_LABELS.map(({ key, label }) => (
+                                      <div key={key} className="deterministic-run-field">
+                                        <span className="deterministic-run-label">{label}:</span>
+                                        <span className="deterministic-run-value">
+                                          {normalizeValue(run.prediction?.[key])}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

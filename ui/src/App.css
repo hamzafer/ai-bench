@@ -142,6 +142,98 @@ body {
   cursor: wait;
 }
 
+.row-action.secondary {
+  background: #6366f1;
+}
+
+.row-action.secondary:disabled {
+  background: #a5b4fc;
+}
+
+.row-expand {
+  background: transparent;
+  border: 1px solid #cbd5f5;
+  color: #2563eb;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.batch-actions select {
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d1d5db;
+  font-size: 0.85rem;
+}
+
+.deterministic-detail td {
+  background: #f8fafc;
+}
+
+.deterministic-panel {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.deterministic-runs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.deterministic-run-card {
+  border-radius: 0.75rem;
+  border: 1px solid #dbeafe;
+  background: white;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.08);
+}
+
+.deterministic-run-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.deterministic-run-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.deterministic-run-field {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.deterministic-run-label {
+  color: #475569;
+}
+
+.deterministic-run-value {
+  font-weight: 600;
+}
+
 .match-true {
   background: #ecfdf5;
 }
