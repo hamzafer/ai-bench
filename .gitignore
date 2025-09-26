@@ -40,3 +40,6 @@ auth_token.txt
 # Logs
 *.log
 logs/
+
+# Gemini cache
+data/gemini_cache/
