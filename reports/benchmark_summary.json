@@ -8,9 +8,9 @@
     },
     {
       "field": "patient_ready",
-      "accuracy": 0.8,
+      "accuracy": 0.84,
       "total": 100,
-      "correct": 80
+      "correct": 84
     },
     {
       "field": "patient_short_notice",
@@ -20,12 +20,19 @@
     },
     {
       "field": "availability_mode",
-      "accuracy": 0.66,
+      "accuracy": 0.7,
       "total": 100,
-      "correct": 66
+      "correct": 70
     }
   ],
-  "failure_count": 53,
+  "latency_stats": {
+    "count": 100,
+    "mean_ms": 1155.975366240309,
+    "median_ms": 1138.012687493756,
+    "p95_ms": 1593.065078851214,
+    "max_ms": 2075.3071250073845
+  },
+  "failure_count": 45,
   "total": 100,
   "reports": {
     "accuracy_overview": "/Users/hamza/developer/ai/deepinsight/testing/reports/accuracy_overview.png",
@@ -34,6 +41,7 @@
       "patient_ready": "/Users/hamza/developer/ai/deepinsight/testing/reports/confusion_patient_ready.png",
       "patient_short_notice": "/Users/hamza/developer/ai/deepinsight/testing/reports/confusion_patient_short_notice.png"
     },
+    "latency_distribution": "/Users/hamza/developer/ai/deepinsight/testing/reports/latency_distribution.png",
     "failures_csv": "/Users/hamza/developer/ai/deepinsight/testing/reports/benchmark_failures.csv"
   }
 }

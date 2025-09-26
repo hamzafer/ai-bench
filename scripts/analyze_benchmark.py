@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -68,6 +69,10 @@ def _load_predictions() -> pd.DataFrame:
                 "pred_patient_short_notice": PRED_NORMALIZATION.get(response.get("patient_short_notice"), "unknown"),
                 "pred_availability_mode": "list" if response.get("availability_periods") else "null",
                 "reasoning": response.get("reasoning", ""),
+                "latency_ms": raw.get("latency_ms"),
+                "status_code": raw.get("status_code"),
+                "start_time": raw.get("start_time"),
+                "end_time": raw.get("end_time"),
             }
             records.append(record)
     return pd.DataFrame(records)
@@ -80,6 +85,8 @@ def _prepare_dataset() -> pd.DataFrame:
     for field in LABEL_FIELDS:
         merged[f"match_{field}"] = merged[field] == merged[f"pred_{field}"]
     merged["match_availability_mode"] = merged["availability_mode"] == merged["pred_availability_mode"]
+    if "latency_ms" in merged.columns:
+        merged["latency_ms"] = pd.to_numeric(merged["latency_ms"], errors="coerce")
     return merged
 
 
@@ -93,6 +100,19 @@ def _compute_metrics(dataset: pd.DataFrame) -> List[LabelMetrics]:
     total = int(dataset.shape[0])
     metrics.append(LabelMetrics("availability_mode", correct / total if total else 0.0, total, correct))
     return metrics
+
+
+def _compute_latency_stats(dataset: pd.DataFrame) -> Dict[str, float]:
+    if "latency_ms" not in dataset.columns or dataset["latency_ms"].isna().all():
+        return {}
+    latencies = dataset["latency_ms"].dropna()
+    return {
+        "count": int(latencies.size),
+        "mean_ms": float(latencies.mean()),
+        "median_ms": float(latencies.median()),
+        "p95_ms": float(np.percentile(latencies, 95)),
+        "max_ms": float(latencies.max()),
+    }
 
 
 def _plot_metric_overview(metrics: List[LabelMetrics]) -> None:
@@ -132,6 +152,19 @@ def _plot_confusion(dataset: pd.DataFrame, field: str) -> None:
     plt.close()
 
 
+def _plot_latency(dataset: pd.DataFrame) -> None:
+    if "latency_ms" not in dataset.columns or dataset["latency_ms"].isna().all():
+        return
+    plt.figure(figsize=(6, 4))
+    sns.histplot(dataset["latency_ms"].dropna(), bins=20, kde=True, color="#2a9d8f")
+    plt.title("Latency distribution (ms)")
+    plt.xlabel("Latency (ms)")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(REPORT_DIR / "latency_distribution.png", dpi=200)
+    plt.close()
+
+
 def _save_failures(dataset: pd.DataFrame) -> None:
     failures = dataset[
         (~dataset["match_patient_prioritized"]) |
@@ -153,6 +186,7 @@ def _save_failures(dataset: pd.DataFrame) -> None:
         "availability_mode",
         "pred_availability_mode",
         "reasoning",
+        "latency_ms",
     ]
     failures.to_csv(REPORT_DIR / "benchmark_failures.csv", columns=columns, index=False)
 
@@ -160,13 +194,16 @@ def _save_failures(dataset: pd.DataFrame) -> None:
 def main() -> None:
     dataset = _prepare_dataset()
     metrics = _compute_metrics(dataset)
+    latency_stats = _compute_latency_stats(dataset)
     _plot_metric_overview(metrics)
+    _plot_latency(dataset)
     for field in LABEL_FIELDS:
         _plot_confusion(dataset, field)
     _save_failures(dataset)
     summary_path = REPORT_DIR / "benchmark_summary.json"
     summary_payload: Dict[str, Any] = {
         "metrics": [m.__dict__ for m in metrics],
+        "latency_stats": latency_stats,
         "failure_count": int((~dataset[[
             "match_patient_prioritized",
             "match_patient_ready",
@@ -179,6 +216,7 @@ def main() -> None:
             "confusion_matrices": {
                 field: str((REPORT_DIR / f"confusion_{field}.png").resolve()) for field in LABEL_FIELDS
             },
+            "latency_distribution": str((REPORT_DIR / "latency_distribution.png").resolve()),
             "failures_csv": str((REPORT_DIR / "benchmark_failures.csv").resolve()),
         },
     }
