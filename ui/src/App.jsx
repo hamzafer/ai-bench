@@ -14,6 +14,84 @@ const normalizeValue = (value) => {
   return String(value).toLowerCase();
 };
 
+const computeDeterminismStats = (detail) => {
+  const { runs = [], truth = {} } = detail || {};
+  if (!runs.length) return null;
+
+  const latencies = runs
+    .map((run) => run.latency_ms)
+    .filter((value) => typeof value === 'number' && !Number.isNaN(value));
+
+  const latencyStats = latencies.length
+    ? {
+        mean: latencies.reduce((sum, value) => sum + value, 0) / latencies.length,
+        min: Math.min(...latencies),
+        max: Math.max(...latencies),
+      }
+    : null;
+
+  const fieldStats = FIELD_LABELS.map(({ key, label }) => {
+    const truthValue = normalizeValue(truth[key]);
+    const counts = new Map();
+    let matchCount = 0;
+    runs.forEach((run) => {
+      const value = normalizeValue(run.prediction?.[key]);
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+      if (value === truthValue) {
+        matchCount += 1;
+      }
+    });
+    const distribution = Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
+    return {
+      key,
+      label,
+      truthValue,
+      matchCount,
+      total: runs.length,
+      distribution,
+    };
+  });
+
+  const availabilityStats = (() => {
+    const truthAvailability = normalizeValue(
+      truth.availability_periods === 'null'
+        ? null
+        : truth.availability_periods && truth.availability_periods !== 'null'
+        ? 'list'
+        : truth.availability_periods,
+    );
+    const counts = new Map();
+    let matchCount = 0;
+    runs.forEach((run) => {
+      const predAvailability =
+        run.prediction?.availability_periods && run.prediction.availability_periods.length ? 'list' : 'null';
+      const value = normalizeValue(predAvailability);
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+      if (value === truthAvailability) {
+        matchCount += 1;
+      }
+    });
+    const distribution = Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
+    return {
+      label: 'Availability',
+      truthValue: truthAvailability,
+      matchCount,
+      total: runs.length,
+      distribution,
+    };
+  })();
+
+  return {
+    latency: latencyStats,
+    fields: fieldStats,
+    availability: availabilityStats,
+  };
+};
+
 function App() {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -188,6 +266,7 @@ function App() {
 
                 const batchCount = deterministicCounts[row.id] ?? 5;
                 const detail = deterministicResults[row.id];
+                const stats = detail ? computeDeterminismStats(detail) : null;
                 const isExpanded = expandedRow === row.id;
 
                 return (
@@ -272,8 +351,47 @@ function App() {
                           {deterministicLoading !== row.id && (!detail || detail.runs?.length === 0) && (
                             <p>No runs yet. Choose a count and press Determinism.</p>
                           )}
-                          {deterministicLoading !== row.id && detail?.runs?.length > 0 && (
+                          {deterministicLoading !== row.id && stats && (
                             <div className="deterministic-runs">
+                              <div className="deterministic-summary">
+                                {stats.latency && (
+                                  <div className="deterministic-summary-item">
+                                    <h5>Latency</h5>
+                                    <p>
+                                      mean {stats.latency.mean.toFixed(0)} ms · min {stats.latency.min.toFixed(0)}
+                                      ms · max {stats.latency.max.toFixed(0)} ms
+                                    </p>
+                                  </div>
+                                )}
+                                <div className="deterministic-summary-item">
+                                  <h5>Field agreement</h5>
+                                  <ul>
+                                    {stats.fields.map((field) => (
+                                      <li key={field.key}>
+                                        <strong>{field.label}:</strong> {field.matchCount}/{field.total} match Truth ({
+                                          ((field.matchCount / field.total) * 100).toFixed(0)
+                                        }
+                                        %) · values:{' '}
+                                        {field.distribution
+                                          .map((item) => `${item.value}×${item.count}`)
+                                          .join(', ')}
+                                      </li>
+                                    ))}
+                                    {stats.availability && (
+                                      <li>
+                                        <strong>{stats.availability.label}:</strong>{' '}
+                                        {stats.availability.matchCount}/{stats.availability.total} match Truth ({
+                                          ((stats.availability.matchCount / stats.availability.total) * 100).toFixed(0)
+                                        }
+                                        %) · values:{' '}
+                                        {stats.availability.distribution
+                                          .map((item) => `${item.value}×${item.count}`)
+                                          .join(', ')}
+                                      </li>
+                                    )}
+                                  </ul>
+                                </div>
+                              </div>
                               {detail.runs.map((run) => (
                                 <div key={run.attempt} className="deterministic-run-card">
                                   <div className="deterministic-run-header">

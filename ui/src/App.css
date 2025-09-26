@@ -196,6 +196,37 @@ body {
   gap: 0.75rem;
 }
 
+.deterministic-summary {
+  grid-column: 1 / -1;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.deterministic-summary h5 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #1d4ed8;
+}
+
+.deterministic-summary p,
+.deterministic-summary ul {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+
+.deterministic-summary ul {
+  list-style: disc inside;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .deterministic-run-card {
   border-radius: 0.75rem;
   border: 1px solid #dbeafe;
