@@ -125,7 +125,7 @@ def _plot_metric_overview(metrics: List[LabelMetrics]) -> None:
         }
     )
     plt.figure(figsize=(8, 4))
-    sns.barplot(data=df, x="field", y="accuracy", palette="viridis")
+    sns.barplot(data=df, x="field", y="accuracy", hue="field", palette="viridis", legend=False)
     plt.ylim(0, 1)
     plt.title("Accuracy per field")
     plt.ylabel("Accuracy")
