@@ -1,0 +1,39 @@
+{
+  "metrics": [
+    {
+      "field": "patient_prioritized",
+      "accuracy": 0.9,
+      "total": 100,
+      "correct": 90
+    },
+    {
+      "field": "patient_ready",
+      "accuracy": 0.8,
+      "total": 100,
+      "correct": 80
+    },
+    {
+      "field": "patient_short_notice",
+      "accuracy": 0.97,
+      "total": 100,
+      "correct": 97
+    },
+    {
+      "field": "availability_mode",
+      "accuracy": 0.66,
+      "total": 100,
+      "correct": 66
+    }
+  ],
+  "failure_count": 53,
+  "total": 100,
+  "reports": {
+    "accuracy_overview": "/Users/hamza/developer/ai/deepinsight/testing/reports/accuracy_overview.png",
+    "confusion_matrices": {
+      "patient_prioritized": "/Users/hamza/developer/ai/deepinsight/testing/reports/confusion_patient_prioritized.png",
+      "patient_ready": "/Users/hamza/developer/ai/deepinsight/testing/reports/confusion_patient_ready.png",
+      "patient_short_notice": "/Users/hamza/developer/ai/deepinsight/testing/reports/confusion_patient_short_notice.png"
+    },
+    "failures_csv": "/Users/hamza/developer/ai/deepinsight/testing/reports/benchmark_failures.csv"
+  }
+}
