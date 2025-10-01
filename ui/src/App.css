@@ -142,6 +142,194 @@ body {
   cursor: wait;
 }
 
+.row-action.secondary {
+  background: #6366f1;
+}
+
+.row-action.secondary:disabled {
+  background: #a5b4fc;
+}
+
+.row-expand {
+  background: transparent;
+  border: 1px solid #cbd5f5;
+  color: #2563eb;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.batch-actions select {
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d1d5db;
+  font-size: 0.85rem;
+}
+
+.deterministic-detail td {
+  background: #f8fafc;
+}
+
+.deterministic-panel {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.determinism-overview {
+  margin-bottom: 2rem;
+  background: #ffffff;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08);
+}
+
+.determinism-overview__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.determinism-overview__cards {
+  margin-bottom: 1rem;
+}
+
+.determinism-overview__field-summary {
+  margin-bottom: 1rem;
+}
+
+.determinism-overview__field-summary h4 {
+  margin: 0 0 0.4rem;
+  color: #1d4ed8;
+}
+
+.determinism-overview__field-summary ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #1f2937;
+  font-size: 0.95rem;
+}
+
+.determinism-overview__table {
+  margin-top: 1rem;
+}
+
+.determinism-overview__empty {
+  margin: 0;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.determinism-refresh {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.deterministic-summary-item {
+  background: #eef2ff;
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+}
+
+.deterministic-total {
+  margin: 0;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.deterministic-runs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.deterministic-summary {
+  grid-column: 1 / -1;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.deterministic-summary h5 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #1d4ed8;
+}
+
+.deterministic-summary p,
+.deterministic-summary ul {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+
+.deterministic-summary ul {
+  list-style: disc inside;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.deterministic-run-card {
+  border-radius: 0.75rem;
+  border: 1px solid #dbeafe;
+  background: white;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.08);
+}
+
+.deterministic-run-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.deterministic-run-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.deterministic-run-field {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.deterministic-run-label {
+  color: #475569;
+}
+
+.deterministic-run-value {
+  font-weight: 600;
+}
+
 .match-true {
   background: #ecfdf5;
 }
