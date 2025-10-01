@@ -19,8 +19,8 @@ npm install
 
 ## Running the stack
 
-We ship a helper script that boots both services (FastAPI backend and
-Vite dev server) in one go:
+The helper script `scripts/run_dev.sh` boots both services (FastAPI backend
+and Vite dev server) in one go:
 
 ```bash
 ./scripts/run_dev.sh
@@ -29,7 +29,7 @@ Vite dev server) in one go:
 By default the API listens on `http://127.0.0.1:8000` and the UI on
 `http://127.0.0.1:5173`. Press `Ctrl+C` to stop both processes.
 
-If you prefer manual control:
+To start the services manually:
 
 ```bash
 # Backend
@@ -49,5 +49,6 @@ npm run dev -- --port 5173
 - `scripts/analyze_benchmark.py` – builds plots, CSVs, and summaries under
   `reports/` (including determinism stats when available).
 
-The new UI surfaces single-row re-runs and determinism batches. Stored
-runs live in `data/determinism/` so you can explore stability over time.
+The UI surfaces single-row re-runs and determinism batches. Stored runs
+live in `data/determinism/`, enabling inspection of model stability over
+time.
