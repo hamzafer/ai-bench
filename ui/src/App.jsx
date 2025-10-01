@@ -14,6 +14,9 @@ const normalizeValue = (value) => {
   return String(value).toLowerCase();
 };
 
+const formatPercent = (value) =>
+  value === null || value === undefined ? '—' : `${(value * 100).toFixed(0)}%`;
+
 const computeDeterminismStats = (detail) => {
   const { runs = [], truth = {} } = detail || {};
   if (!runs.length) return null;
@@ -24,9 +27,9 @@ const computeDeterminismStats = (detail) => {
 
   const latencyStats = latencies.length
     ? {
-        mean: latencies.reduce((sum, value) => sum + value, 0) / latencies.length,
-        min: Math.min(...latencies),
-        max: Math.max(...latencies),
+        mean_ms: latencies.reduce((sum, value) => sum + value, 0) / latencies.length,
+        min_ms: Math.min(...latencies),
+        max_ms: Math.max(...latencies),
       }
     : null;
 
@@ -47,9 +50,10 @@ const computeDeterminismStats = (detail) => {
     return {
       key,
       label,
-      truthValue,
-      matchCount,
+      truth_value: truthValue,
+      match_count: matchCount,
       total: runs.length,
+      match_rate: matchCount / runs.length,
       distribution,
     };
   });
@@ -78,9 +82,10 @@ const computeDeterminismStats = (detail) => {
       .sort((a, b) => b.count - a.count);
     return {
       label: 'Availability',
-      truthValue: truthAvailability,
-      matchCount,
+      truth_value: truthAvailability,
+      match_count: matchCount,
       total: runs.length,
+      match_rate: matchCount / runs.length,
       distribution,
     };
   })();
@@ -101,6 +106,10 @@ function App() {
   const [expandedRow, setExpandedRow] = useState(null);
   const [deterministicCounts, setDeterministicCounts] = useState({});
   const [deterministicResults, setDeterministicResults] = useState({});
+  const [deterministicDetailLoading, setDeterministicDetailLoading] = useState(null);
+  const [determinismSummary, setDeterminismSummary] = useState(null);
+  const [determinismGlobalCount, setDeterminismGlobalCount] = useState(5);
+  const [determinismGlobalLoading, setDeterminismGlobalLoading] = useState(false);
   const [error, setError] = useState('');
 
   const loadResults = async () => {
@@ -118,8 +127,38 @@ function App() {
     }
   };
 
+  const loadDeterminismSummary = async () => {
+    try {
+      const response = await fetch('/api/determinism-summary');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch determinism summary (${response.status})`);
+      }
+      const payload = await response.json();
+      setDeterminismSummary(payload);
+    } catch (err) {
+      console.error('Determinism summary error', err);
+    }
+  };
+
+  const loadDeterminismDetail = async (rowId, limit = 50) => {
+    setDeterministicDetailLoading(rowId);
+    try {
+      const response = await fetch(`/api/determinism/${rowId}?limit=${limit}`);
+      if (!response.ok) {
+        throw new Error('Failed to load determinism detail');
+      }
+      const payload = await response.json();
+      setDeterministicResults((prev) => ({ ...prev, [rowId]: payload }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeterministicDetailLoading(null);
+    }
+  };
+
   useEffect(() => {
     loadResults();
+    loadDeterminismSummary();
   }, []);
 
   const runBenchmark = async () => {
@@ -135,6 +174,7 @@ function App() {
       const payload = await response.json();
       setSummary(payload.summary || null);
       await loadResults();
+      await loadDeterminismSummary();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -144,6 +184,20 @@ function App() {
 
   const metrics = useMemo(() => summary?.metrics || [], [summary]);
   const latency = summary?.latency_stats;
+  const determinismRows = useMemo(() => determinismSummary?.rows || [], [determinismSummary]);
+  const overallDeterminism = determinismSummary?.overall;
+  const topDeterminismRows = useMemo(() => {
+    if (!determinismSummary?.rows) {
+      return [];
+    }
+    return [...determinismSummary.rows]
+      .map((row) => ({
+        ...row,
+        minMatch: row.lowest_match_rate ?? 1,
+      }))
+      .sort((a, b) => a.minMatch - b.minMatch)
+      .slice(0, 5);
+  }, [determinismSummary]);
 
   const setCountForRow = (rowId, value) => {
     setDeterministicCounts((prev) => ({ ...prev, [rowId]: value }));
@@ -177,11 +231,11 @@ function App() {
     }
   };
 
-  const runRowBatch = async (rowId, count) => {
-    setDeterministicLoading(rowId);
-    setError('');
-    try {
-      const response = await fetch(`/api/run-row/${rowId}/batch?count=${count}`, {
+const runRowBatch = async (rowId, count) => {
+  setDeterministicLoading(rowId);
+  setError('');
+  try {
+    const response = await fetch(`/api/run-row/${rowId}/batch?count=${count}&limit=50`, {
         method: 'POST',
       });
       if (!response.ok) {
@@ -190,6 +244,7 @@ function App() {
       const payload = await response.json();
       setDeterministicResults((prev) => ({ ...prev, [rowId]: payload }));
       setExpandedRow(rowId);
+      await loadDeterminismSummary();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -197,8 +252,36 @@ function App() {
     }
   };
 
+  const runDeterminismAll = async () => {
+    setDeterminismGlobalLoading(true);
+    setError('');
+    try {
+      const response = await fetch(
+        `/api/run-determinism-all?count=${determinismGlobalCount}&limit=50`,
+        {
+          method: 'POST',
+        },
+      );
+      if (!response.ok) {
+        throw new Error('Determinism run failed');
+      }
+      const payload = await response.json();
+      setDeterminismSummary(payload.summary || null);
+      setDeterministicResults({});
+      setExpandedRow(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeterminismGlobalLoading(false);
+    }
+  };
+
   const toggleExpandedRow = (rowId) => {
-    setExpandedRow((prev) => (prev === rowId ? null : rowId));
+    const nextRow = expandedRow === rowId ? null : rowId;
+    setExpandedRow(nextRow);
+    if (nextRow && !deterministicResults[rowId]) {
+      loadDeterminismDetail(rowId);
+    }
   };
 
   return (
@@ -230,6 +313,128 @@ function App() {
               median {latency.median_ms.toFixed(0)} · p95 {latency.p95_ms.toFixed(0)} · max {latency.max_ms.toFixed(0)}
             </p>
           </div>
+        )}
+      </section>
+
+      <section className="determinism-overview">
+        <div className="determinism-overview__header">
+          <h2>Determinism</h2>
+          <div className="batch-actions">
+            <select
+              value={determinismGlobalCount}
+              onChange={(event) => setDeterminismGlobalCount(Number(event.target.value))}
+              disabled={determinismGlobalLoading || loading}
+            >
+              {[1, 5, 10].map((value) => (
+                <option key={value} value={value}>
+                  {value}×
+                </option>
+              ))}
+            </select>
+            <button
+              className="row-action secondary"
+              onClick={runDeterminismAll}
+              disabled={determinismGlobalLoading || loading}
+            >
+              {determinismGlobalLoading ? 'Running…' : 'Run all'}
+            </button>
+            <button
+              className="row-expand determinism-refresh"
+              onClick={loadDeterminismSummary}
+              disabled={determinismGlobalLoading || loading}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        {overallDeterminism ? (
+          <>
+            <div className="metrics determinism-overview__cards">
+              <div className="metric-card">
+                <h3>Rows Tested</h3>
+                <p className="metric-card__value">
+                  {overallDeterminism.rows_with_runs}/{overallDeterminism.total_rows}
+                </p>
+                <p className="metric-card__details">{overallDeterminism.total_runs} runs stored</p>
+              </div>
+              {overallDeterminism.latency && (
+                <div className="metric-card">
+                  <h3>Latency (ms)</h3>
+                  <p className="metric-card__value">
+                    {overallDeterminism.latency.mean_ms.toFixed(0)}
+                  </p>
+                  <p className="metric-card__details">
+                    min {overallDeterminism.latency.min_ms.toFixed(0)} · max{' '}
+                    {overallDeterminism.latency.max_ms.toFixed(0)}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="determinism-overview__field-summary">
+              <h4>Field match rates</h4>
+              <ul>
+                {(overallDeterminism?.fields || []).map((field) => (
+                  <li key={field.key}>
+                    <strong>{field.label}:</strong>{' '}
+                    {field.rows_measured ? (
+                      <>
+                        avg {formatPercent(field.average_match_rate)} · worst{' '}
+                        {formatPercent(field.worst_match_rate)} ({field.rows_measured} rows)
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </li>
+                ))}
+                {overallDeterminism?.availability && (
+                  <li>
+                    <strong>{overallDeterminism.availability.label}:</strong>{' '}
+                    {overallDeterminism.availability.rows_measured ? (
+                      <>
+                        avg {formatPercent(overallDeterminism.availability.average_match_rate)} · worst{' '}
+                        {formatPercent(overallDeterminism.availability.worst_match_rate)} ({
+                          overallDeterminism.availability.rows_measured
+                        }{' '}
+                        rows)
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </li>
+                )}
+              </ul>
+            </div>
+            {topDeterminismRows.length > 0 && (
+              <div className="table-wrapper determinism-overview__table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>No.</th>
+                      <th>Comment</th>
+                      <th>Runs</th>
+                      <th>Lowest match</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topDeterminismRows.map((row) => (
+                      <tr key={row.row_id}>
+                        <td>{row.row_number}</td>
+                        <td className="comment-cell">
+                          {row.comment_text?.length > 120
+                            ? `${row.comment_text.slice(0, 120)}…`
+                            : row.comment_text}
+                        </td>
+                        <td>{row.total_runs}</td>
+                        <td>{formatPercent(row.minMatch)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="determinism-overview__empty">No determinism runs yet. Use the controls above to start.</p>
         )}
       </section>
 
@@ -266,7 +471,7 @@ function App() {
 
                 const batchCount = deterministicCounts[row.id] ?? 5;
                 const detail = deterministicResults[row.id];
-                const stats = detail ? computeDeterminismStats(detail) : null;
+                const stats = detail?.stats || (detail ? computeDeterminismStats(detail) : null);
                 const isExpanded = expandedRow === row.id;
 
                 return (
@@ -348,30 +553,33 @@ function App() {
                         <div className="deterministic-panel">
                           <h4>Determinism Check</h4>
                           {deterministicLoading === row.id && <p>Running…</p>}
-                          {deterministicLoading !== row.id && (!detail || detail.runs?.length === 0) && (
+                          {deterministicDetailLoading === row.id && !detail && <p>Loading stored runs…</p>}
+                          {deterministicLoading !== row.id && deterministicDetailLoading !== row.id && (!detail || detail.runs?.length === 0) && (
                             <p>No runs yet. Choose a count and press Determinism.</p>
                           )}
-                          {deterministicLoading !== row.id && stats && (
+                          {deterministicLoading !== row.id && deterministicDetailLoading !== row.id && detail?.total_runs ? (
+                            <p className="deterministic-total">Total runs stored: {detail.total_runs}</p>
+                          ) : null}
+                          {deterministicLoading !== row.id && deterministicDetailLoading !== row.id && stats && detail?.runs?.length > 0 && (
                             <div className="deterministic-runs">
                               <div className="deterministic-summary">
                                 {stats.latency && (
                                   <div className="deterministic-summary-item">
                                     <h5>Latency</h5>
                                     <p>
-                                      mean {stats.latency.mean.toFixed(0)} ms · min {stats.latency.min.toFixed(0)}
-                                      ms · max {stats.latency.max.toFixed(0)} ms
+                                      mean {stats.latency.mean_ms.toFixed(0)} ms · min {stats.latency.min_ms.toFixed(0)}
+                                      ms · max {stats.latency.max_ms.toFixed(0)} ms
                                     </p>
                                   </div>
                                 )}
                                 <div className="deterministic-summary-item">
                                   <h5>Field agreement</h5>
                                   <ul>
-                                    {stats.fields.map((field) => (
+                                    {(stats.fields || []).map((field) => (
                                       <li key={field.key}>
-                                        <strong>{field.label}:</strong> {field.matchCount}/{field.total} match Truth ({
-                                          ((field.matchCount / field.total) * 100).toFixed(0)
-                                        }
-                                        %) · values:{' '}
+                                        <strong>{field.label}:</strong> {field.match_count}/{field.total} match Truth ({
+                                          formatPercent(field.match_rate)
+                                        }) · values:{' '}
                                         {field.distribution
                                           .map((item) => `${item.value}×${item.count}`)
                                           .join(', ')}
@@ -380,10 +588,9 @@ function App() {
                                     {stats.availability && (
                                       <li>
                                         <strong>{stats.availability.label}:</strong>{' '}
-                                        {stats.availability.matchCount}/{stats.availability.total} match Truth ({
-                                          ((stats.availability.matchCount / stats.availability.total) * 100).toFixed(0)
-                                        }
-                                        %) · values:{' '}
+                                        {stats.availability.match_count}/{stats.availability.total} match Truth ({
+                                          formatPercent(stats.availability.match_rate)
+                                        }) · values:{' '}
                                         {stats.availability.distribution
                                           .map((item) => `${item.value}×${item.count}`)
                                           .join(', ')}
@@ -393,10 +600,14 @@ function App() {
                                 </div>
                               </div>
                               {detail.runs.map((run) => (
-                                <div key={run.attempt} className="deterministic-run-card">
+                                <div key={run.attempt ?? `${run.start_time}-${run.latency_ms}`} className="deterministic-run-card">
                                   <div className="deterministic-run-header">
-                                    <span>Attempt {run.attempt}</span>
-                                    <span>{run.latency_ms.toFixed(0)} ms</span>
+                                    <span>Attempt {run.attempt ?? '-'}</span>
+                                    <span>
+                                      {typeof run.latency_ms === 'number'
+                                        ? `${run.latency_ms.toFixed(0)} ms`
+                                        : '—'}
+                                    </span>
                                   </div>
                                   <div className="deterministic-run-body">
                                     {FIELD_LABELS.map(({ key, label }) => (
