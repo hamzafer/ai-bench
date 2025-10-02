@@ -23,6 +23,7 @@ _PROGRESS_PATH = _PROJECT_ROOT / "data" / "review_progress.json"
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _CACHE_DIR = _PROJECT_ROOT / "data" / "review_cache"
 _TRANSLATION_CACHE_PATH = _CACHE_DIR / "translation_cache.json"
+_AI_ASSISTANT_CACHE_PATH = _CACHE_DIR / "ai_assistant_cache.json"
 
 
 def load_data() -> List[Dict[str, Any]]:
@@ -127,6 +128,25 @@ def save_translation_cache(cache: Dict[str, str]) -> None:
     )
 
 
+def load_ai_assistant_cache() -> Dict[str, str]:
+    """Load AI assistant cache from disk."""
+    if not _AI_ASSISTANT_CACHE_PATH.exists():
+        return {}
+    try:
+        return json.loads(_AI_ASSISTANT_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_ai_assistant_cache(cache: Dict[str, str]) -> None:
+    """Save AI assistant cache to disk."""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _AI_ASSISTANT_CACHE_PATH.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+
+
 def translate_text(text: str, model: Optional[Any] = None) -> str:
     """Translate Norwegian text to English using Gemini."""
     if not TRANSLATION_AVAILABLE or model is None:
@@ -185,7 +205,7 @@ def get_translation_model() -> Optional[Any]:
         return None
 
 
-def get_ai_assistant(text: str, current_labels: Dict[str, Any]) -> str:
+def get_ai_assistant(text: str, current_labels: Dict[str, Any], force_refresh: bool = False) -> str:
     """Get AI analysis of the record using Gemini 2.5 Pro."""
     if not TRANSLATION_AVAILABLE:
         return "AI Assistant unavailable (google-generativeai not installed)"
@@ -193,6 +213,15 @@ def get_ai_assistant(text: str, current_labels: Dict[str, Any]) -> str:
     api_key = load_api_key()
     if not api_key:
         return "AI Assistant unavailable (GEMINI_API_KEY not set)"
+    
+    # Check cache first (unless force refresh)
+    if not force_refresh:
+        if "ai_assistant_cache" not in st.session_state:
+            st.session_state.ai_assistant_cache = load_ai_assistant_cache()
+        
+        cache_key = f"{text}_{json.dumps(current_labels, sort_keys=True)}"
+        if cache_key in st.session_state.ai_assistant_cache:
+            return st.session_state.ai_assistant_cache[cache_key]
     
     try:
         genai.configure(api_key=api_key)
@@ -227,7 +256,17 @@ Format:
 **Recommendation:** [Keep as-is / Change X to Y / etc.]"""
 
         response = model.generate_content(prompt)
-        return response.text.strip()
+        result = response.text.strip()
+        
+        # Cache it
+        if "ai_assistant_cache" not in st.session_state:
+            st.session_state.ai_assistant_cache = load_ai_assistant_cache()
+        
+        cache_key = f"{text}_{json.dumps(current_labels, sort_keys=True)}"
+        st.session_state.ai_assistant_cache[cache_key] = result
+        save_ai_assistant_cache(st.session_state.ai_assistant_cache)
+        
+        return result
     
     except Exception as e:
         return f"AI Assistant error: {str(e)}"
@@ -325,6 +364,39 @@ def main() -> None:
                 st.caption("Install: `pip install google-generativeai`")
             else:
                 st.caption("Set GEMINI_API_KEY in .env file")
+        
+        st.divider()
+        
+        # Batch processing
+        st.header("⚡ Batch Processing")
+        
+        if st.button("🌐 Pre-translate All Records", use_container_width=True):
+            if st.session_state.translation_model:
+                progress_bar = st.progress(0, text="Translating records...")
+                for i, record in enumerate(data):
+                    translate_text(record["comment_text"], st.session_state.translation_model)
+                    progress_bar.progress((i + 1) / len(data), text=f"Translated {i + 1}/{len(data)}")
+                st.success(f"✅ All {len(data)} records translated and cached!")
+            else:
+                st.error("Translation model not available")
+        
+        if st.button("🤖 Pre-analyze All Records (AI)", use_container_width=True):
+            if TRANSLATION_AVAILABLE and load_api_key():
+                progress_bar = st.progress(0, text="AI analyzing records...")
+                for i, record in enumerate(data):
+                    current_labels = {
+                        "patient_prioritized": record["patient_prioritized"],
+                        "patient_ready": record["patient_ready"],
+                        "patient_short_notice": record["patient_short_notice"],
+                        "availability_periods": record["availability_periods"]
+                    }
+                    get_ai_assistant(record["comment_text"], current_labels, force_refresh=False)
+                    progress_bar.progress((i + 1) / len(data), text=f"Analyzed {i + 1}/{len(data)}")
+                st.success(f"✅ All {len(data)} records analyzed and cached!")
+            else:
+                st.error("AI Assistant not available")
+        
+        st.caption("💡 Tip: Run batch processing once, then review quickly with cached results")
         
         st.divider()
         
@@ -464,18 +536,43 @@ def main() -> None:
     with st.expander("🤖 AI Assistant - Get Gemini 2.5 Pro Analysis", expanded=False):
         st.caption("Click 'Analyze' to get AI verification of labels with explanations")
         
-        if st.button("🔍 Analyze with Gemini 2.5 Pro", use_container_width=True):
-            with st.spinner("🧠 AI analyzing record..."):
-                current_labels = {
-                    "patient_prioritized": record["patient_prioritized"],
-                    "patient_ready": record["patient_ready"],
-                    "patient_short_notice": record["patient_short_notice"],
-                    "availability_periods": record["availability_periods"]
-                }
-                analysis = get_ai_assistant(record["comment_text"], current_labels)
-                st.session_state[f"ai_analysis_{idx}"] = analysis
+        # Check if analysis already exists in cache
+        current_labels = {
+            "patient_prioritized": record["patient_prioritized"],
+            "patient_ready": record["patient_ready"],
+            "patient_short_notice": record["patient_short_notice"],
+            "availability_periods": record["availability_periods"]
+        }
         
-        # Show cached analysis if exists
+        # Load cache and check
+        if "ai_assistant_cache" not in st.session_state:
+            st.session_state.ai_assistant_cache = load_ai_assistant_cache()
+        
+        cache_key = f"{record['comment_text']}_{json.dumps(current_labels, sort_keys=True)}"
+        has_cached = cache_key in st.session_state.ai_assistant_cache
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button(
+                "🔍 Analyze" if not has_cached else "🔍 Show Cached Analysis",
+                use_container_width=True,
+                type="primary" if not has_cached else "secondary"
+            ):
+                with st.spinner("🧠 AI analyzing record..."):
+                    analysis = get_ai_assistant(record["comment_text"], current_labels, force_refresh=False)
+                    st.session_state[f"ai_analysis_{idx}"] = analysis
+        
+        with col_btn2:
+            if has_cached and st.button("🔄 Re-analyze (Fresh)", use_container_width=True):
+                with st.spinner("🧠 AI re-analyzing record..."):
+                    analysis = get_ai_assistant(record["comment_text"], current_labels, force_refresh=True)
+                    st.session_state[f"ai_analysis_{idx}"] = analysis
+        
+        if has_cached:
+            st.caption("✅ Analysis cached - Click 'Show Cached' for instant results or 'Re-analyze' to refresh")
+        
+        # Show analysis if exists in session state
         if f"ai_analysis_{idx}" in st.session_state:
             st.markdown("### 🎯 AI Analysis:")
             st.markdown(st.session_state[f"ai_analysis_{idx}"])
