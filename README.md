@@ -52,3 +52,17 @@ npm run dev -- --port 5173
 The UI surfaces single-row re-runs and determinism batches. Stored runs
 live in `data/determinism/`, enabling inspection of model stability over
 time.
+
+## Manual ground-truth review
+
+A Streamlit UI simplifies manual verification of `data/ground_truth.csv`.
+
+```bash
+./scripts/run_review.sh
+```
+
+The session persists progress (`data/review_progress.json`), supports
+optional Norwegian→English translation via Gemini (set
+`GEMINI_API_KEY` in `.env`), and exports corrections to
+`data/ground_truth_reviewed.csv`. Detailed usage notes live in
+`REVIEW_TOOL.md`.
