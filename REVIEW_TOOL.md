@@ -109,6 +109,7 @@ The tool uses Google's Gemini AI to translate Norwegian text to English in real-
 - Cached translations (saves API calls)
 - Preserves medical abbreviations and informal tone
 - Helps non-Norwegian speakers understand the context
+- Cache stored in `data/review_cache/translation_cache.json`
 
 **Without Translation:**
 The tool works perfectly fine without translation, you just won't see the English version.
@@ -129,7 +130,8 @@ data/
 ├── ground_truth.csv              # Input: AI-generated data
 ├── ground_truth_reviewed.csv     # Output: Your reviewed data
 ├── review_progress.json          # Progress tracking
-└── translation_cache.json        # Translation cache
+└── review_cache/
+    └── translation_cache.json    # Translation cache
 ```
 
 ## Tips

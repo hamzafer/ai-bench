@@ -21,7 +21,8 @@ _INPUT_PATH = _PROJECT_ROOT / "data" / "ground_truth.csv"
 _REVIEWED_PATH = _PROJECT_ROOT / "data" / "ground_truth_reviewed.csv"
 _PROGRESS_PATH = _PROJECT_ROOT / "data" / "review_progress.json"
 _ENV_PATH = _PROJECT_ROOT / ".env"
-_TRANSLATION_CACHE_PATH = _PROJECT_ROOT / "data" / "translation_cache.json"
+_CACHE_DIR = _PROJECT_ROOT / "data" / "review_cache"
+_TRANSLATION_CACHE_PATH = _CACHE_DIR / "translation_cache.json"
 
 
 def load_data() -> List[Dict[str, Any]]:
@@ -119,7 +120,7 @@ def load_translation_cache() -> Dict[str, str]:
 
 def save_translation_cache(cache: Dict[str, str]) -> None:
     """Save translation cache to disk."""
-    _TRANSLATION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _TRANSLATION_CACHE_PATH.write_text(
         json.dumps(cache, ensure_ascii=False, indent=2),
         encoding="utf-8"
