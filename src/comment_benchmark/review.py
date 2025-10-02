@@ -185,6 +185,54 @@ def get_translation_model() -> Optional[Any]:
         return None
 
 
+def get_ai_assistant(text: str, current_labels: Dict[str, Any]) -> str:
+    """Get AI analysis of the record using Gemini 2.5 Pro."""
+    if not TRANSLATION_AVAILABLE:
+        return "AI Assistant unavailable (google-generativeai not installed)"
+    
+    api_key = load_api_key()
+    if not api_key:
+        return "AI Assistant unavailable (GEMINI_API_KEY not set)"
+    
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("models/gemini-2.5-pro")
+        
+        prompt = f"""Analyze this Norwegian hospital scheduling note and verify the labels are correct.
+
+Norwegian text:
+{text}
+
+Current labels:
+- patient_prioritized: {current_labels.get('patient_prioritized')}
+- patient_ready: {current_labels.get('patient_ready')}
+- patient_short_notice: {current_labels.get('patient_short_notice')}
+- availability_periods: {json.dumps(current_labels.get('availability_periods'), ensure_ascii=False)}
+
+Instructions:
+1. Translate the text to English
+2. For each label, explain if it's CORRECT or WRONG based on the text
+3. If wrong, suggest the correct value
+4. Be concise but clear
+
+Format:
+**Translation:** [English translation]
+
+**Analysis:**
+- patient_prioritized: [CORRECT/WRONG] - [brief explanation]
+- patient_ready: [CORRECT/WRONG] - [brief explanation]
+- patient_short_notice: [CORRECT/WRONG] - [brief explanation]
+- availability_periods: [CORRECT/WRONG] - [brief explanation]
+
+**Recommendation:** [Keep as-is / Change X to Y / etc.]"""
+
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    
+    except Exception as e:
+        return f"AI Assistant error: {str(e)}"
+
+
 def format_bool_display(value: str) -> str:
     """Format bool for display with icons."""
     if value == "true":
@@ -409,6 +457,28 @@ def main() -> None:
             """, unsafe_allow_html=True)
         else:
             st.info("💡 Enable translation in sidebar to see English version →")
+    
+    st.divider()
+    
+    # AI Assistant Section
+    with st.expander("🤖 AI Assistant - Get Gemini 2.5 Pro Analysis", expanded=False):
+        st.caption("Click 'Analyze' to get AI verification of labels with explanations")
+        
+        if st.button("🔍 Analyze with Gemini 2.5 Pro", use_container_width=True):
+            with st.spinner("🧠 AI analyzing record..."):
+                current_labels = {
+                    "patient_prioritized": record["patient_prioritized"],
+                    "patient_ready": record["patient_ready"],
+                    "patient_short_notice": record["patient_short_notice"],
+                    "availability_periods": record["availability_periods"]
+                }
+                analysis = get_ai_assistant(record["comment_text"], current_labels)
+                st.session_state[f"ai_analysis_{idx}"] = analysis
+        
+        # Show cached analysis if exists
+        if f"ai_analysis_{idx}" in st.session_state:
+            st.markdown("### 🎯 AI Analysis:")
+            st.markdown(st.session_state[f"ai_analysis_{idx}"])
     
     st.divider()
     
