@@ -18,7 +18,6 @@ except ImportError:
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _INPUT_PATH = _PROJECT_ROOT / "data" / "ground_truth.csv"
-_REVIEWED_PATH = _PROJECT_ROOT / "data" / "ground_truth_reviewed.csv"
 _PROGRESS_PATH = _PROJECT_ROOT / "data" / "review_progress.json"
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _CACHE_DIR = _PROJECT_ROOT / "data" / "review_cache"
@@ -31,11 +30,21 @@ def load_data() -> List[Dict[str, Any]]:
     if not _INPUT_PATH.exists():
         st.error(f"Ground truth file not found: {_INPUT_PATH}")
         return []
-    
+
     rows = []
     with _INPUT_PATH.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            # Parse boolean fields from CSV strings
+            for field in ["patient_prioritized", "patient_ready", "patient_short_notice"]:
+                val = row[field].strip().lower()
+                if val == "true":
+                    row[field] = True
+                elif val == "false":
+                    row[field] = False
+                else:
+                    row[field] = None
+
             # Parse JSON field
             try:
                 if row["availability_periods"] and row["availability_periods"].strip():
@@ -68,28 +77,68 @@ def load_progress() -> Dict[str, Any]:
         return {"current_index": 0, "reviewed_ids": []}
 
 
-def save_reviewed_data(rows: List[Dict[str, Any]]) -> None:
-    """Save reviewed data to CSV."""
-    _REVIEWED_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "id",
-        "comment_text",
-        "patient_prioritized",
-        "patient_ready",
-        "patient_short_notice",
-        "availability_periods",
-        "reviewed",
-    ]
-    
-    with _REVIEWED_PATH.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            csv_row = row.copy()
-            csv_row["availability_periods"] = json.dumps(
-                row["availability_periods"], ensure_ascii=False
-            ) if row["availability_periods"] else ""
-            writer.writerow(csv_row)
+def save_single_record(record: Dict[str, Any]) -> None:
+    """Update a single record in ground_truth.csv by ID."""
+    _INPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read all lines from CSV
+    with _INPUT_PATH.open("r", encoding="utf-8", newline="") as f:
+        lines = f.readlines()
+
+    if not lines:
+        return
+
+    # Parse CSV to find the record
+    reader = csv.DictReader(lines)
+    fieldnames = reader.fieldnames
+
+    # Find and update the matching row
+    updated_lines = [lines[0]]  # Keep header
+    found = False
+
+    for row in reader:
+        if row["id"] == record["id"]:
+            # Found the record - update it
+            found = True
+
+            def bool_to_csv_str(val):
+                if val is True:
+                    return "true"
+                elif val is False:
+                    return "false"
+                else:
+                    return "null"
+
+            # Build updated row
+            updated_row = {
+                "id": record["id"],
+                "comment_text": record["comment_text"],
+                "patient_prioritized": bool_to_csv_str(record["patient_prioritized"]),
+                "patient_ready": bool_to_csv_str(record["patient_ready"]),
+                "patient_short_notice": bool_to_csv_str(record["patient_short_notice"]),
+                "availability_periods": json.dumps(
+                    record["availability_periods"], ensure_ascii=False
+                ) if record["availability_periods"] is not None else "null"
+            }
+
+            # Convert to CSV line
+            import io
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writerow(updated_row)
+            updated_lines.append(output.getvalue())
+        else:
+            # Keep original line unchanged
+            # Reconstruct from the current reader position
+            import io
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writerow(row)
+            updated_lines.append(output.getvalue())
+
+    # Write back to file
+    with _INPUT_PATH.open("w", encoding="utf-8", newline="") as f:
+        f.writelines(updated_lines)
 
 
 def load_api_key() -> Optional[str]:
@@ -440,9 +489,12 @@ def main() -> None:
         
         # Quick actions
         st.header("🚀 Quick Actions")
-        if st.button("💾 Export Reviewed Data", use_container_width=True):
-            save_reviewed_data(st.session_state.data)
-            st.success(f"✅ Exported to:\n`{_REVIEWED_PATH.name}`")
+        if st.button("💾 Save All Changes", use_container_width=True):
+            # Save all reviewed records
+            for rec in st.session_state.data:
+                if rec.get("reviewed"):
+                    save_single_record(rec)
+            st.success(f"✅ Saved reviewed records to:\n`{_INPUT_PATH.name}`\n\nCommit with git!")
         
         if st.button("🔄 Reset Progress", use_container_width=True):
             st.session_state.current_index = 0
@@ -646,42 +698,63 @@ def main() -> None:
         
         # Boolean fields in columns for compact layout
         col_b1, col_b2, col_b3 = st.columns(3)
-        
+
+        # Helper to convert Python bool to string for radio
+        def bool_to_str(val):
+            if val is True:
+                return "true"
+            elif val is False:
+                return "false"
+            else:
+                return "null"
+
+        # Helper to convert radio string back to Python bool
+        def str_to_bool(val):
+            if val == "true":
+                return True
+            elif val == "false":
+                return False
+            else:
+                return None
+
         with col_b1:
             st.write("**Patient Prioritized:**")
-            prioritized = st.radio(
+            prioritized_str = st.radio(
                 "patient_prioritized",
                 options=["true", "false", "null"],
-                index=["true", "false", "null"].index(record["patient_prioritized"]),
+                index=["true", "false", "null"].index(bool_to_str(record["patient_prioritized"])),
                 key=f"prioritized_{idx}",
                 label_visibility="collapsed",
                 help="Is the patient prioritized for scheduling?"
             )
-            st.caption(format_bool_display(prioritized))
-        
+            st.caption(format_bool_display(prioritized_str))
+            prioritized = str_to_bool(prioritized_str)
+
         with col_b2:
             st.write("**Patient Ready:**")
-            ready = st.radio(
+            ready_str = st.radio(
                 "patient_ready",
                 options=["true", "false", "null"],
-                index=["true", "false", "null"].index(record["patient_ready"]),
+                index=["true", "false", "null"].index(bool_to_str(record["patient_ready"])),
                 key=f"ready_{idx}",
                 label_visibility="collapsed",
                 help="Is the patient ready for operation?"
             )
-            st.caption(format_bool_display(ready))
-        
+            st.caption(format_bool_display(ready_str))
+            ready = str_to_bool(ready_str)
+
         with col_b3:
             st.write("**Short Notice:**")
-            short_notice = st.radio(
+            short_notice_str = st.radio(
                 "patient_short_notice",
                 options=["true", "false", "null"],
-                index=["true", "false", "null"].index(record["patient_short_notice"]),
+                index=["true", "false", "null"].index(bool_to_str(record["patient_short_notice"])),
                 key=f"short_notice_{idx}",
                 label_visibility="collapsed",
                 help="Can patient come on short notice?"
             )
-            st.caption(format_bool_display(short_notice))
+            st.caption(format_bool_display(short_notice_str))
+            short_notice = str_to_bool(short_notice_str)
     
     with col_right:
         st.subheader("📅 Availability Periods")
@@ -761,23 +834,11 @@ def main() -> None:
     
     # Action buttons
     st.divider()
-    col_action1, col_action2, col_action3, col_action4 = st.columns(4)
-    
+    col_action1, col_action2, col_action3 = st.columns(3)
+
     with col_action1:
-        if st.button("✅ Mark Correct & Next", type="primary", use_container_width=True, key="mark_correct"):
-            # Mark as reviewed without changes
-            st.session_state.reviewed_ids.add(record["id"])
-            record["reviewed"] = True
-            next_idx = idx + 1
-            save_progress(next_idx, list(st.session_state.reviewed_ids))
-            if idx < len(data) - 1:
-                st.session_state.current_index = next_idx
-            st.rerun()
-        st.caption("⌨️ Ctrl+Enter")
-    
-    with col_action2:
-        if st.button("💾 Save Changes & Next", use_container_width=True):
-            # Parse and save changes
+        if st.button("✅ Save & Next", type="primary", use_container_width=True, key="save_next"):
+            # Parse and save changes (or keep as-is if no edits)
             try:
                 # Update record
                 record["comment_text"] = new_comment
@@ -798,24 +859,34 @@ def main() -> None:
                 record["reviewed"] = True
                 st.session_state.reviewed_ids.add(record["id"])
 
+                # Auto-save this record to CSV
+                save_single_record(record)
+
                 next_idx = idx + 1
                 save_progress(next_idx, list(st.session_state.reviewed_ids))
 
-                st.success("✅ Changes saved!")
                 if idx < len(data) - 1:
                     st.session_state.current_index = next_idx
                 st.rerun()
             except json.JSONDecodeError as e:
                 st.error(f"❌ Invalid JSON in availability_periods: {str(e)}")
-    
+        st.caption("⌨️ Ctrl+Enter")
+
+    with col_action2:
+        if st.button("⏭️ Skip", use_container_width=True):
+            # Move to next without marking as reviewed
+            if idx < len(data) - 1:
+                st.session_state.current_index = idx + 1
+                st.rerun()
+
     with col_action3:
-        if st.button("🗑️ Delete Record", use_container_width=True):
+        if st.button("🗑️ Delete", use_container_width=True):
             # Confirm deletion
             if st.session_state.get("confirm_delete") != record["id"]:
                 st.session_state.confirm_delete = record["id"]
                 st.warning("⚠️ Click again to confirm deletion")
                 st.stop()
-            
+
             # Remove record
             st.session_state.data.pop(idx)
             st.session_state.reviewed_ids.discard(record["id"])
@@ -824,13 +895,6 @@ def main() -> None:
             st.session_state.confirm_delete = None
             st.success("🗑️ Record deleted!")
             st.rerun()
-    
-    with col_action4:
-        if st.button("⏭️ Skip for Now", use_container_width=True):
-            # Move to next without marking as reviewed
-            if idx < len(data) - 1:
-                st.session_state.current_index = idx + 1
-                st.rerun()
 
 
 if __name__ == "__main__":
