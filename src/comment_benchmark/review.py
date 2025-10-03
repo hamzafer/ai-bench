@@ -257,20 +257,33 @@ def get_ai_assistant(text: str, current_labels: Dict[str, Any], force_refresh: b
     """Get AI analysis of the record using Gemini 2.5 Pro."""
     if not TRANSLATION_AVAILABLE:
         return "AI Assistant unavailable (google-generativeai not installed)"
-    
+
     api_key = load_api_key()
     if not api_key:
         return "AI Assistant unavailable (GEMINI_API_KEY not set)"
-    
+
     # Check cache first (unless force refresh)
     if not force_refresh:
         if "ai_assistant_cache" not in st.session_state:
             st.session_state.ai_assistant_cache = load_ai_assistant_cache()
-        
-        cache_key = f"{text}_{json.dumps(current_labels, sort_keys=True)}"
+
+        # Normalize labels for backwards compatible cache keys
+        # Booleans -> strings, but keep None as None (becomes null in JSON)
+        normalized_labels = {}
+        for k, v in current_labels.items():
+            if v is True:
+                normalized_labels[k] = "true"
+            elif v is False:
+                normalized_labels[k] = "false"
+            elif v is None and k != "availability_periods":
+                normalized_labels[k] = "null"
+            else:
+                # Keep availability_periods as None (not "null") for JSON null
+                normalized_labels[k] = v
+        cache_key = f"{text}_{json.dumps(normalized_labels, sort_keys=True)}"
         if cache_key in st.session_state.ai_assistant_cache:
             return st.session_state.ai_assistant_cache[cache_key]
-    
+
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("models/gemini-2.5-pro")
@@ -305,15 +318,25 @@ Format:
 
         response = model.generate_content(prompt)
         result = response.text.strip()
-        
-        # Cache it
+
+        # Cache it with normalized key (same format as cache lookup)
         if "ai_assistant_cache" not in st.session_state:
             st.session_state.ai_assistant_cache = load_ai_assistant_cache()
-        
-        cache_key = f"{text}_{json.dumps(current_labels, sort_keys=True)}"
+
+        normalized_labels = {}
+        for k, v in current_labels.items():
+            if v is True:
+                normalized_labels[k] = "true"
+            elif v is False:
+                normalized_labels[k] = "false"
+            elif v is None and k != "availability_periods":
+                normalized_labels[k] = "null"
+            else:
+                normalized_labels[k] = v
+        cache_key = f"{text}_{json.dumps(normalized_labels, sort_keys=True)}"
         st.session_state.ai_assistant_cache[cache_key] = result
         save_ai_assistant_cache(st.session_state.ai_assistant_cache)
-        
+
         return result
     
     except Exception as e:
@@ -489,13 +512,81 @@ def main() -> None:
         
         # Quick actions
         st.header("🚀 Quick Actions")
-        if st.button("💾 Save All Changes", use_container_width=True):
-            # Save all reviewed records
-            for rec in st.session_state.data:
-                if rec.get("reviewed"):
-                    save_single_record(rec)
-            st.success(f"✅ Saved reviewed records to:\n`{_INPUT_PATH.name}`\n\nCommit with git!")
-        
+
+        if st.button("📤 Push Changes to Git", use_container_width=True, type="primary"):
+            import subprocess
+            import getpass
+
+            try:
+                # Get current branch
+                result = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=_PROJECT_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                current_branch = result.stdout.strip()
+
+                # Create or switch to review branch
+                review_branch = "review-groundtruth"
+
+                # Check if branch exists
+                branch_check = subprocess.run(
+                    ["git", "rev-parse", "--verify", review_branch],
+                    cwd=_PROJECT_ROOT,
+                    capture_output=True,
+                    text=True
+                )
+
+                if branch_check.returncode != 0:
+                    # Create new branch
+                    subprocess.run(
+                        ["git", "checkout", "-b", review_branch],
+                        cwd=_PROJECT_ROOT,
+                        check=True
+                    )
+                    st.info(f"✨ Created new branch: {review_branch}")
+                else:
+                    # Switch to existing branch if not already on it
+                    if current_branch != review_branch:
+                        subprocess.run(
+                            ["git", "checkout", review_branch],
+                            cwd=_PROJECT_ROOT,
+                            check=True
+                        )
+                        st.info(f"🔀 Switched to branch: {review_branch}")
+
+                # Add and commit
+                subprocess.run(
+                    ["git", "add", "data/ground_truth.csv", "data/review_progress.json"],
+                    cwd=_PROJECT_ROOT,
+                    check=True
+                )
+
+                reviewed_count = len(st.session_state.reviewed_ids)
+                commit_msg = f"Review progress: {reviewed_count} records reviewed"
+
+                subprocess.run(
+                    ["git", "commit", "-m", commit_msg],
+                    cwd=_PROJECT_ROOT,
+                    check=True
+                )
+
+                # Push to remote
+                subprocess.run(
+                    ["git", "push", "-u", "origin", review_branch],
+                    cwd=_PROJECT_ROOT,
+                    check=True
+                )
+
+                st.success(f"✅ Pushed {reviewed_count} reviewed records to branch: {review_branch}")
+
+            except subprocess.CalledProcessError as e:
+                st.error(f"❌ Git error: {e}")
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+
         if st.button("🔄 Reset Progress", use_container_width=True):
             st.session_state.current_index = 0
             st.session_state.reviewed_ids = set()
@@ -506,7 +597,7 @@ def main() -> None:
     
     # Main content
     # Navigation
-    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1.5, 1, 2])
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1.5, 2])
 
     with col1:
         if st.button("⏮️ First", disabled=idx == 0):
@@ -524,27 +615,23 @@ def main() -> None:
             st.rerun()
 
     with col4:
-        jump_to = st.number_input(
-            "Jump to record:",
-            min_value=1,
-            max_value=len(data),
-            value=idx + 1,
-            key="jump_input"
-        )
-        if st.button("🎯 Go"):
-            st.session_state.current_index = jump_to - 1
-            st.rerun()
+        col_input, col_btn = st.columns([2, 1])
+        with col_input:
+            jump_to = st.number_input(
+                "Jump to record:",
+                min_value=1,
+                max_value=len(data),
+                value=idx + 1,
+                key="jump_input",
+                label_visibility="collapsed"
+            )
+        with col_btn:
+            if st.button("🎯 Go"):
+                st.session_state.current_index = jump_to - 1
+                st.rerun()
 
     with col5:
-        # Filter options
-        filter_option = st.selectbox(
-            "Filter:",
-            ["All", "Unreviewed Only", "Reviewed Only"],
-            key="filter"
-        )
-
-    with col6:
-        st.info(f"📍 Record **{idx + 1}** of **{len(data)}**")
+        st.markdown(f"<div style='padding-top: 8px;'>📍 Record <b>{idx + 1}</b> of <b>{len(data)}</b></div>", unsafe_allow_html=True)
 
     # Visual overview of all records (collapsed by default)
     with st.expander("📊 View All Records Grid (Click to Expand)", expanded=False):
@@ -633,49 +720,43 @@ def main() -> None:
     st.divider()
     
     # AI Assistant Section
-    with st.expander("🤖 AI Assistant - Get Gemini 2.5 Pro Analysis", expanded=False):
-        st.caption("Click 'Analyze' to get AI verification of labels with explanations")
-        
-        # Check if analysis already exists in cache
+    with st.expander("🤖 AI Assistant - Gemini 2.5 Pro Analysis", expanded=False):
         current_labels = {
             "patient_prioritized": record["patient_prioritized"],
             "patient_ready": record["patient_ready"],
             "patient_short_notice": record["patient_short_notice"],
             "availability_periods": record["availability_periods"]
         }
-        
-        # Load cache and check
+
+        # Auto-load cached analysis if available
         if "ai_assistant_cache" not in st.session_state:
             st.session_state.ai_assistant_cache = load_ai_assistant_cache()
-        
-        cache_key = f"{record['comment_text']}_{json.dumps(current_labels, sort_keys=True)}"
+
+        # Check cache using normalized key
+        normalized_labels = {}
+        for k, v in current_labels.items():
+            if v is True:
+                normalized_labels[k] = "true"
+            elif v is False:
+                normalized_labels[k] = "false"
+            elif v is None and k != "availability_periods":
+                normalized_labels[k] = "null"
+            else:
+                normalized_labels[k] = v
+        cache_key = f"{record['comment_text']}_{json.dumps(normalized_labels, sort_keys=True)}"
         has_cached = cache_key in st.session_state.ai_assistant_cache
-        
-        col_btn1, col_btn2 = st.columns(2)
-        
-        with col_btn1:
-            if st.button(
-                "🔍 Analyze" if not has_cached else "🔍 Show Cached Analysis",
-                use_container_width=True,
-                type="primary" if not has_cached else "secondary"
-            ):
-                with st.spinner("🧠 AI analyzing record..."):
-                    analysis = get_ai_assistant(record["comment_text"], current_labels, force_refresh=False)
-                    st.session_state[f"ai_analysis_{idx}"] = analysis
-        
-        with col_btn2:
-            if has_cached and st.button("🔄 Re-analyze (Fresh)", use_container_width=True):
-                with st.spinner("🧠 AI re-analyzing record..."):
-                    analysis = get_ai_assistant(record["comment_text"], current_labels, force_refresh=True)
-                    st.session_state[f"ai_analysis_{idx}"] = analysis
-        
+
+        # Auto-show cached analysis
         if has_cached:
-            st.caption("✅ Analysis cached - Click 'Show Cached' for instant results or 'Re-analyze' to refresh")
-        
-        # Show analysis if exists in session state
-        if f"ai_analysis_{idx}" in st.session_state:
             st.markdown("### 🎯 AI Analysis:")
-            st.markdown(st.session_state[f"ai_analysis_{idx}"])
+            st.markdown(st.session_state.ai_assistant_cache[cache_key])
+            st.caption("✅ Cached analysis")
+
+        # Re-analyze button
+        if st.button("🔄 Re-analyze (Fresh)", use_container_width=True, key=f"reanalyze_{idx}"):
+            with st.spinner("🧠 AI analyzing record..."):
+                analysis = get_ai_assistant(record["comment_text"], current_labels, force_refresh=True)
+                st.rerun()
     
     st.divider()
     
@@ -761,54 +842,75 @@ def main() -> None:
 
         availability = record["availability_periods"]
 
-        # Display current as formatted JSON
-        if availability:
-            st.json(availability, expanded=True)
-        else:
-            st.info("⚪ No availability periods (null)")
+        # Two columns: display and edit side by side
+        col_display, col_edit = st.columns([1, 1])
 
-        # Initialize text state
-        state_key = f"avail_text_{idx}_{record['id']}"
-        if state_key not in st.session_state:
-            st.session_state[state_key] = json.dumps(availability, ensure_ascii=False, indent=2) if availability else "null"
+        with col_display:
+            st.write("**Current:**")
+            # Display current as formatted JSON
+            if availability:
+                st.json(availability, expanded=True)
+            else:
+                st.info("⚪ null")
 
         # Template buttons
         st.write("**Quick Templates:**")
         col_t1, col_t2, col_t3 = st.columns(3)
 
+        # Storage key for session state
+        storage_key = f"avail_storage_{idx}_{record['id']}"
+        widget_key = f"avail_widget_{idx}_{record['id']}"
+
+        # Initialize state only once per record
+        if storage_key not in st.session_state:
+            st.session_state[storage_key] = json.dumps(availability, ensure_ascii=False, indent=2) if availability else "null"
+
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = st.session_state[storage_key]
+
         with col_t1:
             if st.button("➕ Available From", use_container_width=True, key=f"tmpl_avail_{idx}"):
-                st.session_state[state_key] = json.dumps([{
+                template_value = json.dumps([{
                     "type": "available_from",
                     "start_date": "2025-10-01",
                     "end_date": None
                 }], ensure_ascii=False, indent=2)
+                st.session_state[storage_key] = template_value
+                st.session_state[widget_key] = template_value
                 st.rerun()
 
         with col_t2:
             if st.button("🚫 Unavailable Between", use_container_width=True, key=f"tmpl_unavail_{idx}"):
-                st.session_state[state_key] = json.dumps([{
+                template_value = json.dumps([{
                     "type": "unavailable_between",
                     "start_date": "2025-06-15",
                     "end_date": "2025-08-20"
                 }], ensure_ascii=False, indent=2)
+                st.session_state[storage_key] = template_value
+                st.session_state[widget_key] = template_value
                 st.rerun()
 
         with col_t3:
             if st.button("⚪ Set Null", use_container_width=True, key=f"tmpl_null_{idx}"):
-                st.session_state[state_key] = "null"
+                st.session_state[storage_key] = "null"
+                st.session_state[widget_key] = "null"
                 st.rerun()
 
-        # Edit as JSON
-        st.write("**Edit Availability:**")
+        with col_edit:
+            st.write("**Edit:**")
 
-        new_availability_str = st.text_area(
-            "JSON or 'null':",
-            value=st.session_state[state_key],
-            height=120,
-            key=state_key,
-            help="Single item array: available_from (no end_date) OR unavailable_between (with end_date)"
-        )
+            # Use storage_key directly as the widget key
+            new_availability_str = st.text_area(
+                "JSON or 'null':",
+                value=st.session_state[storage_key],
+                height=305,
+                key=widget_key,
+                help="Single item array",
+                label_visibility="collapsed"
+            )
+
+            # Update storage from widget after user edits
+            st.session_state[storage_key] = st.session_state[widget_key]
 
         # Validation preview
         try:
