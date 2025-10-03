@@ -1,0 +1,42 @@
+<View>
+  <Style>
+    .meta {margin-bottom: 10px; font-size: 14px; color: #555;}
+    .meta strong {color: #111;}
+    .section {margin-bottom: 18px;}
+  </Style>
+  <Header value="Comment Sense v2 - Ground Truth Review"/>
+  <View className="section">
+    <Text name="comment" value="$comment_text" granularity="sentence"/>
+  </View>
+  <View className="section meta">
+    <Header value="Existing Labels"/>
+    <Text name="meta_prioritized" value="Prioritized: $patient_prioritized"/>
+    <Text name="meta_ready" value="Ready: $patient_ready"/>
+    <Text name="meta_short" value="Short notice: $patient_short_notice"/>
+    <Text name="meta_avail" value="Availability: $availability_periods"/>
+  </View>
+  <View className="section">
+    <Choices name="prioritized" toName="comment" choice="single" showInline="true" required="true">
+      <Choice value="true"/>
+      <Choice value="false"/>
+      <Choice value="null"/>
+    </Choices>
+  </View>
+  <View className="section">
+    <Choices name="ready" toName="comment" choice="single" showInline="true" required="true">
+      <Choice value="true"/>
+      <Choice value="false"/>
+      <Choice value="null"/>
+    </Choices>
+  </View>
+  <View className="section">
+    <Choices name="short_notice" toName="comment" choice="single" showInline="true" required="true">
+      <Choice value="true"/>
+      <Choice value="false"/>
+      <Choice value="null"/>
+    </Choices>
+  </View>
+  <View className="section">
+    <TextArea name="availability" toName="comment" rows="4" editable="true" value="$availability_periods"/>
+  </View>
+</View>

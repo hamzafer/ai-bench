@@ -43,6 +43,8 @@ logs/
 
 # Gemini cache
 data/gemini_cache/
+data/review_cache/
+data/labelstudio/
 
 # UI build artifacts
 ui/node_modules/
