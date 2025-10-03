@@ -9,10 +9,11 @@
     <Text name="comment" value="$comment_text" granularity="sentence"/>
   </View>
   <View className="section meta">
-    <Html value="Patient prioritized: <strong>$patient_prioritized</strong>"/>
-    <Html value="Patient ready: <strong>$patient_ready</strong>"/>
-    <Html value="Patient short notice: <strong>$patient_short_notice</strong>"/>
-    <Html value="Availability periods: <strong>$availability_periods</strong>"/>
+    <Header value="Existing Labels"/>
+    <Text name="meta_prioritized" value="Prioritized: $patient_prioritized"/>
+    <Text name="meta_ready" value="Ready: $patient_ready"/>
+    <Text name="meta_short" value="Short notice: $patient_short_notice"/>
+    <Text name="meta_avail" value="Availability: $availability_periods"/>
   </View>
   <View className="section">
     <Choices name="prioritized" toName="comment" choice="single" showInline="true" required="true">
