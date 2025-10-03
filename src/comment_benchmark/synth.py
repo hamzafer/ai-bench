@@ -22,7 +22,9 @@ SEED = 7
 MAX_RETRIES = 4
 SYSTEM_INSTRUCTION = (
     "Du lager datasettposter for interne sykehusnotater. Returner kun gyldig JSON som matcher schemaet. "
-    "Ingen forklaringstekst. comment_text skal være kort (maks 2 linjer) og bruke apostrof i stedet for doble anførselstegn."
+    "Ingen forklaringstekst. comment_text skal være kort (maks 2 linjer) og bruke apostrof i stedet for doble anførselstegn. "
+    "Feltet availability_periods skal enten være null eller en liste med NØYAKTIG ett objekt. "
+    "Hvis objektet har type 'available_from' skal end_date være null. Hvis type er 'unavailable_between' må både start_date og end_date være satt i ISO-format (YYYY-MM-DD)."
 )
 RETRY_SUFFIXES: List[str] = [
     "",
@@ -124,23 +126,31 @@ _AVAILABILITY_ITEM_SCHEMA = {
     'type': 'object',
     'properties': {
         'type': {'type': 'string', 'enum': ['available_from', 'unavailable_between']},
-        'start_date': {'type': 'string'},
-        'end_date': {'type': 'string', 'nullable': True},
+        'start_date': {'type': 'string', 'minLength': 10},
+        'end_date': {'type': 'string', 'nullable': True, 'minLength': 10},
     },
     'required': ['type', 'start_date'],
+    'additionalProperties': False,
 }
 
 _RESPONSE_SCHEMA = {
     'type': 'object',
+    'additionalProperties': False,
     'properties': {
         'comment_text': {'type': 'string'},
         'patient_prioritized': {'type': 'boolean', 'nullable': True},
         'patient_ready': {'type': 'boolean', 'nullable': True},
         'patient_short_notice': {'type': 'boolean', 'nullable': True},
         'availability_periods': {
-            'type': 'array',
-            'nullable': True,
-            'items': _AVAILABILITY_ITEM_SCHEMA,
+            'anyOf': [
+                {'type': 'null'},
+                {
+                    'type': 'array',
+                    'items': _AVAILABILITY_ITEM_SCHEMA,
+                    'minItems': 1,
+                    'maxItems': 1,
+                },
+            ],
         },
     },
     'required': [
@@ -240,8 +250,8 @@ def _availability_instruction(mode: str) -> str:
     if mode == "list":
         return (
             "availability_periods skal være en liste med NØYAKTIG 1 objekt. "
-            "Type kan være 'available_from' (kun start_date, end_date=null) eller 'unavailable_between' (start_date og end_date). "
-            "Datoer i ISO (YYYY-MM-DD). Teksten må omtale samme periode."
+            "Type kan være 'available_from' (kun start_date, end_date = null) eller 'unavailable_between' (start_date og end_date). "
+            "Datoer i ISO (YYYY-MM-DD). Ingen ekstra felter er lov. Teksten må omtale samme periode."
         )
     return "availability_periods skal være null og teksten må ikke gi eksplisitte datoperioder."
 
@@ -385,7 +395,7 @@ def _build_prompt(spec: LabelSpec, style_seed: str) -> str:
     guidelines = "\n- ".join([""] + instructions)
 
     availability_hint = (
-        "Lag 1 periode: bruk 'available_from' hvis pas er tilgjengelig fra en dato, eller 'unavailable_between' hvis pas er utilgjengelig i en periode."
+        "Lag nøyaktig ÉN periode. Bruk 'available_from' hvis pas er tilgjengelig fra en dato (end_date = null), eller 'unavailable_between' hvis pas er utilgjengelig mellom to datoer (begge datoene må angis)."
         if spec.availability_mode == "list"
         else "Hent inspirasjon fra stil uten å oppgi datoperiode direkte."
     )
