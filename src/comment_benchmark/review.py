@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -12,12 +13,149 @@ import streamlit as st
 # Check if translation is available
 try:
     import google.generativeai as genai
+
     TRANSLATION_AVAILABLE = True
 except ImportError:
     TRANSLATION_AVAILABLE = False
 
+
+BOOL_FIELDS = (
+    "patient_prioritized",
+    "patient_ready",
+    "patient_short_notice",
+)
+
+BOOL_RADIO_OPTIONS = ("true", "false", "null")
+
+STYLE_AND_SHORTCUTS = """
+        <style>
+        /* Compact layout - prevent scrolling */
+        .main .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-height: 100vh;
+            overflow: hidden;
+        }
+        .stButton button {
+            width: 100%;
+        }
+        .stButton button[kind="secondary"] {
+            background-color: #4CAF50 !important;
+            color: white !important;
+        }
+        /* Reduce margins/padding */
+        .element-container {
+            margin-bottom: 0.5rem;
+        }
+        h1 {
+            margin-bottom: 0.5rem !important;
+        }
+        hr {
+            margin: 0.5rem 0 !important;
+        }
+        </style>
+        <script>
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + Right Arrow: Next
+            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight') {
+                e.preventDefault();
+                const nextBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Next'));
+                if (nextBtn) nextBtn.click();
+            }
+            // Ctrl/Cmd + Left Arrow: Previous
+            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const prevBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Prev'));
+                if (prevBtn) prevBtn.click();
+            }
+            // Ctrl/Cmd + Enter: Mark Correct & Next
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                const correctBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Mark Correct'));
+                if (correctBtn) correctBtn.click();
+            }
+        });
+        </script>
+    """
+
+TRANSLATION_PROMPT_TEMPLATE = """Translate this Norwegian hospital scheduling note to English.
+
+Instructions:
+- Keep medical abbreviations as-is (MR, CT, ASA, etc.)
+- Maintain the informal/colloquial tone
+- Preserve any typos or shorthand in spirit
+- Keep it concise
+- Only return the translation, no explanations
+
+Norwegian text:
+{text}
+
+English translation:"""
+
+AI_ASSISTANT_PROMPT_TEMPLATE = """Analyze this Norwegian hospital scheduling note and verify the labels are correct.
+
+Norwegian text:
+{text}
+
+Current labels:
+- patient_prioritized: {patient_prioritized}
+- patient_ready: {patient_ready}
+- patient_short_notice: {patient_short_notice}
+- availability_periods: {availability_periods}
+
+Instructions:
+1. Translate the text to English
+2. For each label, explain if it's CORRECT or WRONG based on the text
+3. If wrong, suggest the correct value
+4. Be concise but clear
+
+Format:
+**Translation:** [English translation]
+
+**Analysis:**
+- patient_prioritized: [CORRECT/WRONG] - [brief explanation]
+- patient_ready: [CORRECT/WRONG] - [brief explanation]
+- patient_short_notice: [CORRECT/WRONG] - [brief explanation]
+- availability_periods: [CORRECT/WRONG] - [brief explanation]
+
+**Recommendation:** [Keep as-is / Change X to Y / etc.]"""
+
+
+def csv_bool_to_python(value: Optional[str]) -> Optional[bool]:
+    """Convert CSV boolean strings to Python bool/None."""
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
+def python_bool_to_csv(value: Optional[bool]) -> str:
+    """Convert Python bool/None to CSV-friendly string."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "null"
+
+
+def bool_to_radio_value(value: Optional[bool]) -> str:
+    """Map Python bool/None into radio widget options."""
+    return python_bool_to_csv(value)
+
+
+def radio_value_to_bool(value: str) -> Optional[bool]:
+    """Map radio widget selection back to Python bool/None."""
+    return csv_bool_to_python(value)
+
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _INPUT_PATH = _PROJECT_ROOT / "data" / "ground_truth.csv"
+_REVIEWED_PATH = _PROJECT_ROOT / "data" / "ground_truth_reviewed.csv"
 _PROGRESS_PATH = _PROJECT_ROOT / "data" / "review_progress.json"
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _CACHE_DIR = _PROJECT_ROOT / "data" / "review_cache"
@@ -36,14 +174,8 @@ def load_data() -> List[Dict[str, Any]]:
         reader = csv.DictReader(f)
         for row in reader:
             # Parse boolean fields from CSV strings
-            for field in ["patient_prioritized", "patient_ready", "patient_short_notice"]:
-                val = row[field].strip().lower()
-                if val == "true":
-                    row[field] = True
-                elif val == "false":
-                    row[field] = False
-                else:
-                    row[field] = None
+            for field in BOOL_FIELDS:
+                row[field] = csv_bool_to_python(row.get(field))
 
             # Parse JSON field
             try:
@@ -77,6 +209,30 @@ def load_progress() -> Dict[str, Any]:
         return {"current_index": 0, "reviewed_ids": []}
 
 
+def save_reviewed_data(rows: List[Dict[str, Any]]) -> None:
+    """Save reviewed data to CSV."""
+    _REVIEWED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "id",
+        "comment_text",
+        "patient_prioritized",
+        "patient_ready",
+        "patient_short_notice",
+        "availability_periods",
+        "reviewed",
+    ]
+
+    with _REVIEWED_PATH.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            csv_row = row.copy()
+            csv_row["availability_periods"] = json.dumps(
+                row["availability_periods"], ensure_ascii=False
+            ) if row["availability_periods"] else ""
+            writer.writerow(csv_row)
+
+
 def save_single_record(record: Dict[str, Any]) -> None:
     """Update a single record in ground_truth.csv by ID."""
     _INPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -90,51 +246,32 @@ def save_single_record(record: Dict[str, Any]) -> None:
 
     # Parse CSV to find the record
     reader = csv.DictReader(lines)
-    fieldnames = reader.fieldnames
+    fieldnames = reader.fieldnames or []
+
+    def dict_to_csv_line(row_data: Dict[str, Any]) -> str:
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writerow(row_data)
+        return output.getvalue()
 
     # Find and update the matching row
     updated_lines = [lines[0]]  # Keep header
-    found = False
 
     for row in reader:
-        if row["id"] == record["id"]:
-            # Found the record - update it
-            found = True
-
-            def bool_to_csv_str(val):
-                if val is True:
-                    return "true"
-                elif val is False:
-                    return "false"
-                else:
-                    return "null"
-
-            # Build updated row
+        if row.get("id") == record["id"]:
             updated_row = {
                 "id": record["id"],
                 "comment_text": record["comment_text"],
-                "patient_prioritized": bool_to_csv_str(record["patient_prioritized"]),
-                "patient_ready": bool_to_csv_str(record["patient_ready"]),
-                "patient_short_notice": bool_to_csv_str(record["patient_short_notice"]),
+                "patient_prioritized": python_bool_to_csv(record["patient_prioritized"]),
+                "patient_ready": python_bool_to_csv(record["patient_ready"]),
+                "patient_short_notice": python_bool_to_csv(record["patient_short_notice"]),
                 "availability_periods": json.dumps(
                     record["availability_periods"], ensure_ascii=False
-                ) if record["availability_periods"] is not None else "null"
+                ) if record["availability_periods"] is not None else "null",
             }
-
-            # Convert to CSV line
-            import io
-            output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=fieldnames)
-            writer.writerow(updated_row)
-            updated_lines.append(output.getvalue())
+            updated_lines.append(dict_to_csv_line(updated_row))
         else:
-            # Keep original line unchanged
-            # Reconstruct from the current reader position
-            import io
-            output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=fieldnames)
-            writer.writerow(row)
-            updated_lines.append(output.getvalue())
+            updated_lines.append(dict_to_csv_line(row))
 
     # Write back to file
     with _INPUT_PATH.open("w", encoding="utf-8", newline="") as f:
@@ -207,25 +344,13 @@ def translate_text(text: str, model: Optional[Any] = None) -> str:
     
     if text in st.session_state.translation_cache:
         return st.session_state.translation_cache[text]
-    
+
     try:
-        prompt = f"""Translate this Norwegian hospital scheduling note to English.
-
-Instructions:
-- Keep medical abbreviations as-is (MR, CT, ASA, etc.)
-- Maintain the informal/colloquial tone
-- Preserve any typos or shorthand in spirit
-- Keep it concise
-- Only return the translation, no explanations
-
-Norwegian text:
-{text}
-
-English translation:"""
-        
-        response = model.generate_content(prompt)
+        response = model.generate_content(
+            TRANSLATION_PROMPT_TEMPLATE.format(text=text)
+        )
         translation = response.text.strip()
-        
+
         # Cache it
         st.session_state.translation_cache[text] = translation
         save_translation_cache(st.session_state.translation_cache)
@@ -288,33 +413,15 @@ def get_ai_assistant(text: str, current_labels: Dict[str, Any], force_refresh: b
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("models/gemini-2.5-pro")
         
-        prompt = f"""Analyze this Norwegian hospital scheduling note and verify the labels are correct.
-
-Norwegian text:
-{text}
-
-Current labels:
-- patient_prioritized: {current_labels.get('patient_prioritized')}
-- patient_ready: {current_labels.get('patient_ready')}
-- patient_short_notice: {current_labels.get('patient_short_notice')}
-- availability_periods: {json.dumps(current_labels.get('availability_periods'), ensure_ascii=False)}
-
-Instructions:
-1. Translate the text to English
-2. For each label, explain if it's CORRECT or WRONG based on the text
-3. If wrong, suggest the correct value
-4. Be concise but clear
-
-Format:
-**Translation:** [English translation]
-
-**Analysis:**
-- patient_prioritized: [CORRECT/WRONG] - [brief explanation]
-- patient_ready: [CORRECT/WRONG] - [brief explanation]
-- patient_short_notice: [CORRECT/WRONG] - [brief explanation]
-- availability_periods: [CORRECT/WRONG] - [brief explanation]
-
-**Recommendation:** [Keep as-is / Change X to Y / etc.]"""
+        prompt = AI_ASSISTANT_PROMPT_TEMPLATE.format(
+            text=text,
+            patient_prioritized=current_labels.get("patient_prioritized"),
+            patient_ready=current_labels.get("patient_ready"),
+            patient_short_notice=current_labels.get("patient_short_notice"),
+            availability_periods=json.dumps(
+                current_labels.get("availability_periods"), ensure_ascii=False
+            ),
+        )
 
         response = model.generate_content(prompt)
         result = response.text.strip()
@@ -356,56 +463,7 @@ def main() -> None:
     st.set_page_config(page_title="Ground Truth Reviewer", layout="wide")
 
     # Custom CSS for better styling and keyboard shortcuts
-    st.markdown("""
-        <style>
-        /* Compact layout - prevent scrolling */
-        .main .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            max-height: 100vh;
-            overflow: hidden;
-        }
-        .stButton button {
-            width: 100%;
-        }
-        .stButton button[kind="secondary"] {
-            background-color: #4CAF50 !important;
-            color: white !important;
-        }
-        /* Reduce margins/padding */
-        .element-container {
-            margin-bottom: 0.5rem;
-        }
-        h1 {
-            margin-bottom: 0.5rem !important;
-        }
-        hr {
-            margin: 0.5rem 0 !important;
-        }
-        </style>
-        <script>
-        document.addEventListener('keydown', function(e) {
-            // Ctrl/Cmd + Right Arrow: Next
-            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight') {
-                e.preventDefault();
-                const nextBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Next'));
-                if (nextBtn) nextBtn.click();
-            }
-            // Ctrl/Cmd + Left Arrow: Previous
-            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft') {
-                e.preventDefault();
-                const prevBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Prev'));
-                if (prevBtn) prevBtn.click();
-            }
-            // Ctrl/Cmd + Enter: Mark Correct & Next
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                const correctBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Mark Correct'));
-                if (correctBtn) correctBtn.click();
-            }
-        });
-        </script>
-    """, unsafe_allow_html=True)
+    st.markdown(STYLE_AND_SHORTCUTS, unsafe_allow_html=True)
     
     st.title("🏥 Comment Sense v2 - Ground Truth Review")
     st.caption("Review and correct AI-generated hospital scheduling notes")
@@ -776,66 +834,54 @@ def main() -> None:
         )
         
         st.subheader("🏷️ Labels")
-        
+
         # Boolean fields in columns for compact layout
         col_b1, col_b2, col_b3 = st.columns(3)
-
-        # Helper to convert Python bool to string for radio
-        def bool_to_str(val):
-            if val is True:
-                return "true"
-            elif val is False:
-                return "false"
-            else:
-                return "null"
-
-        # Helper to convert radio string back to Python bool
-        def str_to_bool(val):
-            if val == "true":
-                return True
-            elif val == "false":
-                return False
-            else:
-                return None
 
         with col_b1:
             st.write("**Patient Prioritized:**")
             prioritized_str = st.radio(
                 "patient_prioritized",
-                options=["true", "false", "null"],
-                index=["true", "false", "null"].index(bool_to_str(record["patient_prioritized"])),
+                options=BOOL_RADIO_OPTIONS,
+                index=BOOL_RADIO_OPTIONS.index(
+                    bool_to_radio_value(record["patient_prioritized"])
+                ),
                 key=f"prioritized_{idx}",
                 label_visibility="collapsed",
                 help="Is the patient prioritized for scheduling?"
             )
             st.caption(format_bool_display(prioritized_str))
-            prioritized = str_to_bool(prioritized_str)
+            prioritized = radio_value_to_bool(prioritized_str)
 
         with col_b2:
             st.write("**Patient Ready:**")
             ready_str = st.radio(
                 "patient_ready",
-                options=["true", "false", "null"],
-                index=["true", "false", "null"].index(bool_to_str(record["patient_ready"])),
+                options=BOOL_RADIO_OPTIONS,
+                index=BOOL_RADIO_OPTIONS.index(
+                    bool_to_radio_value(record["patient_ready"])
+                ),
                 key=f"ready_{idx}",
                 label_visibility="collapsed",
                 help="Is the patient ready for operation?"
             )
             st.caption(format_bool_display(ready_str))
-            ready = str_to_bool(ready_str)
+            ready = radio_value_to_bool(ready_str)
 
         with col_b3:
             st.write("**Short Notice:**")
             short_notice_str = st.radio(
                 "patient_short_notice",
-                options=["true", "false", "null"],
-                index=["true", "false", "null"].index(bool_to_str(record["patient_short_notice"])),
+                options=BOOL_RADIO_OPTIONS,
+                index=BOOL_RADIO_OPTIONS.index(
+                    bool_to_radio_value(record["patient_short_notice"])
+                ),
                 key=f"short_notice_{idx}",
                 label_visibility="collapsed",
                 help="Can patient come on short notice?"
             )
             st.caption(format_bool_display(short_notice_str))
-            short_notice = str_to_bool(short_notice_str)
+            short_notice = radio_value_to_bool(short_notice_str)
     
     with col_right:
         st.subheader("📅 Availability Periods")
