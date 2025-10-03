@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
 
-DEFAULT_MODEL_NAME = "models/gemini-2.5-flash"
+DEFAULT_MODEL_NAME = "models/gemini-2.5-pro"
 SEED = 7
 MAX_RETRIES = 4
 SYSTEM_INSTRUCTION = (
@@ -36,7 +36,7 @@ LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_STYLE_PATH = _PROJECT_ROOT / "sample.md"
+_STYLE_PATH = _PROJECT_ROOT / "sample_answer.md"
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _OUTPUT_PATH = _PROJECT_ROOT / "data" / "ground_truth.csv"
 _CACHE_DIR = _PROJECT_ROOT / "data" / "gemini_cache"
@@ -123,11 +123,11 @@ _BASE_SPECS: List[LabelSpec] = [
 _AVAILABILITY_ITEM_SCHEMA = {
     'type': 'object',
     'properties': {
-        'type': {'type': 'string'},
+        'type': {'type': 'string', 'enum': ['available_from', 'unavailable_between']},
         'start_date': {'type': 'string'},
-        'end_date': {'type': 'string'},
+        'end_date': {'type': 'string', 'nullable': True},
     },
-    'required': ['type', 'start_date', 'end_date'],
+    'required': ['type', 'start_date'],
 }
 
 _RESPONSE_SCHEMA = {
@@ -239,8 +239,9 @@ def _bool_instruction(value: Optional[bool], descriptor: str) -> str:
 def _availability_instruction(mode: str) -> str:
     if mode == "list":
         return (
-            "availability_periods skal være en liste med 1-2 objekter, hver med type, start_date og end_date."
-            " Datoer i ISO (YYYY-MM-DD). Teksten må omtale samme perioder."
+            "availability_periods skal være en liste med NØYAKTIG 1 objekt. "
+            "Type kan være 'available_from' (kun start_date, end_date=null) eller 'unavailable_between' (start_date og end_date). "
+            "Datoer i ISO (YYYY-MM-DD). Teksten må omtale samme periode."
         )
     return "availability_periods skal være null og teksten må ikke gi eksplisitte datoperioder."
 
@@ -331,19 +332,32 @@ def _ensure_types(record: Dict[str, Any], spec: LabelSpec) -> Dict[str, Any]:
             raise ValueError("Expected availability list, got null")
         if not isinstance(availability, list):
             raise ValueError("availability_periods must be a list")
-        normalized_periods: List[Dict[str, str]] = []
-        for item in availability:
-            if not isinstance(item, dict):
-                raise ValueError("Each availability period must be an object")
-            period = {
-                "type": str(item.get("type", "")).strip(),
-                "start_date": str(item.get("start_date", "")).strip(),
-                "end_date": str(item.get("end_date", "")).strip(),
-            }
-            if not all(period.values()):
-                raise ValueError("Availability period fields cannot be empty")
-            normalized_periods.append(period)
-        record["availability_periods"] = normalized_periods
+        if len(availability) != 1:
+            raise ValueError(f"availability_periods must have exactly 1 item, got {len(availability)}")
+
+        item = availability[0]
+        if not isinstance(item, dict):
+            raise ValueError("Availability period must be an object")
+
+        period_type = str(item.get("type", "")).strip()
+        start_date = str(item.get("start_date", "")).strip()
+        end_date = item.get("end_date")
+
+        if period_type not in ["available_from", "unavailable_between"]:
+            raise ValueError(f"type must be 'available_from' or 'unavailable_between', got '{period_type}'")
+        if not start_date:
+            raise ValueError("start_date is required")
+
+        if period_type == "available_from":
+            # available_from: end_date should be null
+            period = {"type": period_type, "start_date": start_date, "end_date": None}
+        else:  # unavailable_between
+            # unavailable_between: end_date is required
+            if not end_date or str(end_date).strip().lower() in ["null", "none", ""]:
+                raise ValueError("end_date is required for unavailable_between")
+            period = {"type": period_type, "start_date": start_date, "end_date": str(end_date).strip()}
+
+        record["availability_periods"] = [period]
     else:
         if availability not in (None, "null"):
             if isinstance(availability, list) and len(availability) == 0:
@@ -371,7 +385,9 @@ def _build_prompt(spec: LabelSpec, style_seed: str) -> str:
     guidelines = "\n- ".join([""] + instructions)
 
     availability_hint = (
-        "Lag tydelige perioder med type som 'ferie', 'ledig', 'sykefravær' osv." if spec.availability_mode == "list" else "Hent inspirasjon fra stil uten å oppgi datoperiode direkte."
+        "Lag 1 periode: bruk 'available_from' hvis pas er tilgjengelig fra en dato, eller 'unavailable_between' hvis pas er utilgjengelig i en periode."
+        if spec.availability_mode == "list"
+        else "Hent inspirasjon fra stil uten å oppgi datoperiode direkte."
     )
 
     prompt = f"""

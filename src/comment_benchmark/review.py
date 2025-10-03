@@ -197,8 +197,7 @@ def get_translation_model() -> Optional[Any]:
     
     try:
         genai.configure(api_key=api_key)
-        # Use the same model as synth.py for consistency
-        model = genai.GenerativeModel("models/gemini-2.5-flash")
+        model = genai.GenerativeModel("models/gemini-2.5-pro")
         return model
     except Exception as e:
         st.error(f"Failed to initialize translation model: {e}")
@@ -283,34 +282,57 @@ def format_bool_display(value: str) -> str:
 
 def main() -> None:
     st.set_page_config(page_title="Ground Truth Reviewer", layout="wide")
-    
-    # Custom CSS for better styling
+
+    # Custom CSS for better styling and keyboard shortcuts
     st.markdown("""
         <style>
+        /* Compact layout - prevent scrolling */
+        .main .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-height: 100vh;
+            overflow: hidden;
+        }
         .stButton button {
             width: 100%;
         }
-        .translation-box {
-            background-color: #e8f5e9;
-            padding: 15px;
-            border-radius: 5px;
-            border-left: 4px solid #4CAF50;
-            margin: 10px 0;
-            color: #1b5e20;
-            font-size: 16px;
-            line-height: 1.6;
+        .stButton button[kind="secondary"] {
+            background-color: #4CAF50 !important;
+            color: white !important;
         }
-        .original-box {
-            background-color: #fff3e0;
-            padding: 15px;
-            border-radius: 5px;
-            border-left: 4px solid #ff9800;
-            margin: 10px 0;
-            color: #e65100;
-            font-size: 16px;
-            line-height: 1.6;
+        /* Reduce margins/padding */
+        .element-container {
+            margin-bottom: 0.5rem;
+        }
+        h1 {
+            margin-bottom: 0.5rem !important;
+        }
+        hr {
+            margin: 0.5rem 0 !important;
         }
         </style>
+        <script>
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + Right Arrow: Next
+            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight') {
+                e.preventDefault();
+                const nextBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Next'));
+                if (nextBtn) nextBtn.click();
+            }
+            // Ctrl/Cmd + Left Arrow: Previous
+            if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const prevBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Prev'));
+                if (prevBtn) prevBtn.click();
+            }
+            // Ctrl/Cmd + Enter: Mark Correct & Next
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                const correctBtn = Array.from(document.querySelectorAll('button')).find(btn => btn.innerText.includes('Mark Correct'));
+                if (correctBtn) correctBtn.click();
+            }
+        });
+        </script>
     """, unsafe_allow_html=True)
     
     st.title("🏥 Comment Sense v2 - Ground Truth Review")
@@ -429,38 +451,27 @@ def main() -> None:
             st.success("Progress reset!")
             st.rerun()
         
-        # Keyboard shortcuts
-        with st.expander("⌨️ Tips"):
-            st.markdown("""
-            **Navigation:**
-            - Use Previous/Next buttons
-            - Jump to specific record
-            
-            **Review:**
-            - ✅ Correct: No changes needed
-            - 💾 Save: Edit and save changes
-            - 🗑️ Delete: Remove bad record
-            
-            **Translation:**
-            - Toggle in sidebar
-            - Cached for speed
-            """)
     
     # Main content
     # Navigation
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 1.5, 1, 2])
-    
+    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1.5, 1, 2])
+
     with col1:
-        if st.button("⬅️ Previous", disabled=idx == 0):
+        if st.button("⏮️ First", disabled=idx == 0):
+            st.session_state.current_index = 0
+            st.rerun()
+
+    with col2:
+        if st.button("⬅️ Prev", disabled=idx == 0):
             st.session_state.current_index = max(0, idx - 1)
             st.rerun()
-    
-    with col2:
+
+    with col3:
         if st.button("➡️ Next", disabled=idx >= len(data) - 1):
             st.session_state.current_index = min(len(data) - 1, idx + 1)
             st.rerun()
-    
-    with col3:
+
+    with col4:
         jump_to = st.number_input(
             "Jump to record:",
             min_value=1,
@@ -471,26 +482,63 @@ def main() -> None:
         if st.button("🎯 Go"):
             st.session_state.current_index = jump_to - 1
             st.rerun()
-    
-    with col4:
+
+    with col5:
         # Filter options
         filter_option = st.selectbox(
             "Filter:",
-            ["All", "Unreviewed", "Reviewed"],
+            ["All", "Unreviewed Only", "Reviewed Only"],
             key="filter"
         )
-    
-    with col5:
+
+    with col6:
         st.info(f"📍 Record **{idx + 1}** of **{len(data)}**")
-    
+
+    # Visual overview of all records (collapsed by default)
+    with st.expander("📊 View All Records Grid (Click to Expand)", expanded=False):
+        st.caption("🟢 Green = Reviewed  •  ⚪ Gray = Unreviewed  •  🔴 Red = Current")
+
+        # Create grid of buttons
+        cols_per_row = 20
+        for row_start in range(0, len(data), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for i in range(cols_per_row):
+                record_idx = row_start + i
+                if record_idx >= len(data):
+                    break
+
+                with cols[i]:
+                    record_id = data[record_idx]["id"]
+                    is_reviewed = record_id in st.session_state.reviewed_ids
+                    is_current = record_idx == idx
+
+                    label = f"**{record_idx + 1}**" if is_current else str(record_idx + 1)
+
+                    if is_current:
+                        button_type = "primary"
+                    elif is_reviewed:
+                        button_type = "secondary"
+                    else:
+                        button_type = "tertiary"
+
+                    if st.button(
+                        label,
+                        key=f"jump_{record_idx}",
+                        type=button_type,
+                        use_container_width=True,
+                        help=f"Record {record_idx + 1} - {'✅ Reviewed' if is_reviewed else '⚪ Unreviewed'}"
+                    ):
+                        st.session_state.current_index = record_idx
+                        st.rerun()
+
     # Current record
     if idx >= len(data):
         st.warning("⚠️ No more records!")
         return
-    
+
     record = data[idx]
     is_reviewed = record["id"] in st.session_state.reviewed_ids
-    
+
     # Review status indicator
     if is_reviewed:
         st.success("✅ **This record has been reviewed**")
@@ -503,17 +551,17 @@ def main() -> None:
     col_text_left, col_text_right = st.columns(2)
     
     with col_text_left:
-        st.subheader("🇳🇴 Original (Norwegian)")
+        st.subheader("🇳🇴 Original")
         st.markdown(f"""
-        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; border: 2px solid #ddd;">
-            <p style="color: #000; font-size: 18px; line-height: 1.8; margin: 0; font-weight: 500;">
+        <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
+            <p style="color: #000; font-size: 14px; line-height: 1.4; margin: 0;">
                 {record["comment_text"]}
             </p>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col_text_right:
-        st.subheader("🇬🇧 Translation (English)")
+        st.subheader("🇬🇧 Translation")
         if st.session_state.translation_enabled and st.session_state.translation_model:
             with st.spinner("Translating..."):
                 translation = translate_text(
@@ -521,14 +569,14 @@ def main() -> None:
                     st.session_state.translation_model
                 )
             st.markdown(f"""
-            <div style="background-color: #e8f5e9; padding: 20px; border-radius: 8px; border: 2px solid #4CAF50;">
-                <p style="color: #000; font-size: 18px; line-height: 1.8; margin: 0; font-weight: 500;">
+            <div style="background-color: #e8f5e9; padding: 10px; border-radius: 5px; border: 1px solid #4CAF50;">
+                <p style="color: #000; font-size: 14px; line-height: 1.4; margin: 0;">
                     {translation}
                 </p>
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.info("💡 Enable translation in sidebar to see English version →")
+            st.info("💡 Enable translation in sidebar")
     
     st.divider()
     
@@ -589,7 +637,7 @@ def main() -> None:
         new_comment = st.text_area(
             "Comment text (Norwegian):",
             value=record["comment_text"],
-            height=120,
+            height=80,
             key=f"comment_edit_{idx}",
             help="Edit the Norwegian text if incorrect"
         )
@@ -637,25 +685,58 @@ def main() -> None:
     
     with col_right:
         st.subheader("📅 Availability Periods")
-        
+
         availability = record["availability_periods"]
-        
+
         # Display current as formatted JSON
         if availability:
             st.json(availability, expanded=True)
         else:
             st.info("⚪ No availability periods (null)")
-        
+
+        # Initialize text state
+        state_key = f"avail_text_{idx}_{record['id']}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = json.dumps(availability, ensure_ascii=False, indent=2) if availability else "null"
+
+        # Template buttons
+        st.write("**Quick Templates:**")
+        col_t1, col_t2, col_t3 = st.columns(3)
+
+        with col_t1:
+            if st.button("➕ Available From", use_container_width=True, key=f"tmpl_avail_{idx}"):
+                st.session_state[state_key] = json.dumps([{
+                    "type": "available_from",
+                    "start_date": "2025-10-01",
+                    "end_date": None
+                }], ensure_ascii=False, indent=2)
+                st.rerun()
+
+        with col_t2:
+            if st.button("🚫 Unavailable Between", use_container_width=True, key=f"tmpl_unavail_{idx}"):
+                st.session_state[state_key] = json.dumps([{
+                    "type": "unavailable_between",
+                    "start_date": "2025-06-15",
+                    "end_date": "2025-08-20"
+                }], ensure_ascii=False, indent=2)
+                st.rerun()
+
+        with col_t3:
+            if st.button("⚪ Set Null", use_container_width=True, key=f"tmpl_null_{idx}"):
+                st.session_state[state_key] = "null"
+                st.rerun()
+
         # Edit as JSON
         st.write("**Edit Availability:**")
+
         new_availability_str = st.text_area(
             "JSON or 'null':",
-            value=json.dumps(availability, ensure_ascii=False, indent=2) if availability else "null",
-            height=250,
-            key=f"availability_{idx}",
-            help="Edit as JSON array or set to 'null'"
+            value=st.session_state[state_key],
+            height=120,
+            key=state_key,
+            help="Single item array: available_from (no end_date) OR unavailable_between (with end_date)"
         )
-        
+
         # Validation preview
         try:
             if new_availability_str.strip().lower() == "null":
@@ -663,7 +744,16 @@ def main() -> None:
             else:
                 parsed = json.loads(new_availability_str)
                 if isinstance(parsed, list):
-                    st.success(f"✅ Valid: {len(parsed)} period(s)")
+                    if len(parsed) == 1:
+                        item = parsed[0]
+                        if item.get("type") == "available_from":
+                            st.success(f"✅ Valid: available_from {item.get('start_date')}")
+                        elif item.get("type") == "unavailable_between":
+                            st.success(f"✅ Valid: unavailable {item.get('start_date')} to {item.get('end_date')}")
+                        else:
+                            st.error("❌ type must be 'available_from' or 'unavailable_between'")
+                    else:
+                        st.error(f"❌ Must have exactly 1 item, got {len(parsed)}")
                 else:
                     st.error("❌ Must be array or null")
         except json.JSONDecodeError as e:
@@ -674,7 +764,7 @@ def main() -> None:
     col_action1, col_action2, col_action3, col_action4 = st.columns(4)
     
     with col_action1:
-        if st.button("✅ Mark Correct & Next", type="primary", use_container_width=True):
+        if st.button("✅ Mark Correct & Next", type="primary", use_container_width=True, key="mark_correct"):
             # Mark as reviewed without changes
             st.session_state.reviewed_ids.add(record["id"])
             record["reviewed"] = True
@@ -683,6 +773,7 @@ def main() -> None:
             if idx < len(data) - 1:
                 st.session_state.current_index = next_idx
             st.rerun()
+        st.caption("⌨️ Ctrl+Enter")
     
     with col_action2:
         if st.button("💾 Save Changes & Next", use_container_width=True):
@@ -693,7 +784,7 @@ def main() -> None:
                 record["patient_prioritized"] = prioritized
                 record["patient_ready"] = ready
                 record["patient_short_notice"] = short_notice
-                
+
                 # Parse availability
                 if new_availability_str.strip().lower() == "null":
                     record["availability_periods"] = None
@@ -703,13 +794,13 @@ def main() -> None:
                         st.error("❌ Availability must be an array or null!")
                         st.stop()
                     record["availability_periods"] = parsed_avail
-                
+
                 record["reviewed"] = True
                 st.session_state.reviewed_ids.add(record["id"])
-                
+
                 next_idx = idx + 1
                 save_progress(next_idx, list(st.session_state.reviewed_ids))
-                
+
                 st.success("✅ Changes saved!")
                 if idx < len(data) - 1:
                     st.session_state.current_index = next_idx
