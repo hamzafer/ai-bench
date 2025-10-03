@@ -17,15 +17,21 @@ from typing import Any, Dict, List, Optional
 
 import google.generativeai as genai
 
+# --- Generation configuration -------------------------------------------------
+
 DEFAULT_MODEL_NAME = "models/gemini-2.5-pro"
 SEED = 7
 MAX_RETRIES = 4
+
+# English: Tell Gemini to produce short internal notes and a single availability entry.
 SYSTEM_INSTRUCTION = (
     "Du lager datasettposter for interne sykehusnotater. Returner kun gyldig JSON som matcher schemaet. "
     "Ingen forklaringstekst. comment_text skal være kort (maks 2 linjer) og bruke apostrof i stedet for doble anførselstegn. "
     "Feltet availability_periods skal enten være null eller en liste med NØYAKTIG ett objekt. "
     "Hvis objektet har type 'available_from' skal end_date være null. Hvis type er 'unavailable_between' må både start_date og end_date være satt i ISO-format (YYYY-MM-DD)."
 )
+
+# English: Escalating reminders used on retries when Gemini strays from the schema.
 RETRY_SUFFIXES: List[str] = [
     "",
     "\n\nVIKTIG: Returner KUN gyldig JSON. Ingen ekstra ord. Bruk apostrof i comment_text og hold teksten kort.",
@@ -36,6 +42,8 @@ RETRY_SUFFIXES: List[str] = [
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
+
+# --- Paths and cache ---------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STYLE_PATH = _PROJECT_ROOT / "sample_answer.md"
@@ -56,6 +64,7 @@ class LabelSpec:
     style_hint: str = ""
 
 
+# English: Scenario seeds covering cardiology follow-ups, vacations, re-planning, etc.
 _SCENARIO_HINTS: List[str] = [
     "Pas venter på utsvar fra kardiolog. Noter lab 05.03.25 og referer til gul lapp.",
     "Oppgi at MR knær booket uke 18 og pas ønsker å vente til etter konfirmasjon.",
@@ -79,6 +88,7 @@ _SCENARIO_HINTS: List[str] = [
     "Oppgi at pas må informere oss når han er ferdig med antibiotika 12.06.",
 ]
 
+# English: Style tweaks instructing Gemini to vary slang, tone, punctuation, etc.
 _STYLE_VARIATIONS: List[str] = [
     "Legg inn en kort dialektfrase (f.eks. 'ikkje', 'ska').",
     "Bruk litt telegraf-stil med mange punktum.",
@@ -106,6 +116,7 @@ _STYLE_VARIATIONS: List[str] = [
     "Avslutt med kort call-to-action (ringer fredag).",
 ]
 
+# English: Base label specs pairing target labels with scenario prompts.
 _BASE_SPECS: List[LabelSpec] = [
     LabelSpec(True, True, False, "list", _SCENARIO_HINTS[0]),
     LabelSpec(True, False, True, "list", _SCENARIO_HINTS[1]),
@@ -122,6 +133,7 @@ _BASE_SPECS: List[LabelSpec] = [
 ]
 
 
+# English: JSON schema for a single availability entry returned by Gemini.
 _AVAILABILITY_ITEM_SCHEMA = {
     'type': 'object',
     'properties': {
@@ -133,6 +145,7 @@ _AVAILABILITY_ITEM_SCHEMA = {
     'additionalProperties': False,
 }
 
+# English: Full JSON schema for the Gemini response payload.
 _RESPONSE_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
@@ -246,6 +259,7 @@ def _bool_instruction(value: Optional[bool], descriptor: str) -> str:
     return f"Ikke si noe direkte om hvorvidt pas er {descriptor}."
 
 
+# English: Spell out how we want Gemini to describe availability in Norwegian notes.
 def _availability_instruction(mode: str) -> str:
     if mode == "list":
         return (
@@ -400,6 +414,7 @@ def _build_prompt(spec: LabelSpec, style_seed: str) -> str:
         else "Hent inspirasjon fra stil uten å oppgi datoperiode direkte."
     )
 
+# English: Prompt sent to Gemini describing scenario, style, and schema constraints.
     prompt = f"""
 Du er planlegger ved norsk sykehus. Bruk stilen fra disse notatene:
 ---
