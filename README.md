@@ -66,3 +66,22 @@ optional Norwegian→English translation via Gemini (set
 `GEMINI_API_KEY` in `.env`), and exports corrections to
 `data/ground_truth_reviewed.csv`. Detailed usage notes live in
 `REVIEW_TOOL.md`.
+
+## Reviewing with Label Studio
+
+Prefer a collaborative annotation workflow? Export the ground-truth CSV to
+Label Studio tasks, review records in the browser, and import the results
+back to CSV using the helper scripts:
+
+```bash
+# Generate Label Studio tasks
+uv run python scripts/export_labelstudio.py
+
+# (Annotate in Label Studio, then export JSON)
+
+# Convert annotations back to CSV
+uv run python scripts/import_labelstudio.py
+```
+
+The labeling interface template lives in `labelstudio/comment_sense_config.xml`,
+and full instructions are documented in `LABEL_STUDIO.md`.
